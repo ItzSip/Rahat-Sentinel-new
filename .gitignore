@@ -1,3 +1,70 @@
+<<<<<<< HEAD
+# ===========================
+# Rahat Project .gitignore
+# ===========================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# ML Models & Data (large files)
+sentinel-ai/data/raw/*
+sentinel-ai/data/processed/*
+sentinel-ai/outputs/models/*.pt
+sentinel-ai/outputs/models/*.h5
+sentinel-ai/outputs/models/*.pth
+sentinel-ai/outputs/heatmaps/*
+!sentinel-ai/data/raw/.gitkeep
+!sentinel-ai/data/processed/.gitkeep
+!sentinel-ai/outputs/models/.gitkeep
+!sentinel-ai/outputs/heatmaps/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keys & Secrets
+*.pem
+*.key
+keys/
+.env
+.env.*
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Node (if mobile-app uses it)
+node_modules/
+npm-debug.log*
+=======
 # OSX
 #
 .DS_Store
@@ -73,3 +140,4 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+>>>>>>> 124ea699e03ad771d9284dd3e1b5479259468be7
