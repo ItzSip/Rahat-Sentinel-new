@@ -1,10 +1,9 @@
-import os
 import json
 import logging
 import redis.asyncio as redis
 from typing import Any, Dict
+from app.config import REDIS_URL
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHANNEL_NAME = "sentinel:alerts"
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +36,7 @@ class RedisService:
                     
                 await self.redis_client.publish(CHANNEL_NAME, message)
                 
+                # Explicit hackathon log hook
                 alert_id = payload.get("alert_id", "unknown")
                 logger.info(f"REDIS PUBLISHED: alert_id={alert_id}")
             except Exception as e:

@@ -1,101 +1,85 @@
-<<<<<<< HEAD
-# Rahat-Sentinel
-=======
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Rahat Sentinel
+## AI-Powered Climate Early Warning + Offline Disaster Communication
 
-# Getting Started
+---
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+### The Problem
 
-## Step 1: Start Metro
+Disasters are predictable, but saving lives is rarely about prediction—it's about **delivery**.
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+When a severe climate anomaly strikes, what's the first thing to fail? The cell towers. The internet. The power grid.
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+Governments broadcast warnings into a void, hoping they reach the villages in the crosshairs. But when infrastructure crumbles, those warnings don't reach the people who need them most. 
 
-```sh
-# Using npm
-npm start
+Communication fails precisely when it matters the most.
 
-# OR using Yarn
-yarn start
-```
+---
 
-## Step 2: Build and run your app
+### The Solution
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+**Rahat Sentinel** bridges the deadly gap between global AI prediction and last-mile offline delivery.
 
-### Android
+By combining cutting-edge satellite machine learning with an unstoppable Bluetooth Mesh network, Rahat ensures that no community is left disconnected in an emergency. 
+- **Sentinel** predicts disasters early while the grid is still up.
+- **Rahat** physically delivers the alerts device-to-device even when the grid is completely destroyed.
 
-```sh
-# Using npm
-npm run android
+Mobiles transform into a living, breathing mesh network that propagates high-risk warnings deep into disconnected regions offline.
 
-# OR using Yarn
-yarn android
-```
+---
 
-### iOS
+### How It Works
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+**1. Satellite Sees Anomaly:** Global datasets monitor the environment.
+**2. AI Detects Risk:** Our ML models instantly recognize impending heatwaves, floods, or heavy rainfall.
+**3. Backend Sends Alert:** The Sentinel API instantly drops the climate alert into a real-time Redis queue.
+**4. Phones Spread It Offline:** Any mobile touching the internet catches the alert and silently broadcasts `<512-byte` compressed payloads over Bluetooth. A cascade of offline phones receive the warnings, saving lives.
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+---
 
-```sh
-bundle install
-```
+### Key Features
 
-Then, and every time you update your native dependencies, run:
+* **Real-time Climate Anomaly Detection:** Constant monitoring for impending threats.
+* **Offline BLE Mesh Communication:** Zero-internet propagation.
+* **Geospatial Risk Maps:** Intuitive UI for responders and citizens.
+* **Fail-Safe Reliability:** Works when standard infrastructure collapses.
 
-```sh
-bundle exec pod install
-```
+---
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+### Tech Stack
 
-```sh
-# Using npm
-npm run ios
+- **Data** → Google Earth Engine
+- **AI** → ConvLSTM + GradCAM
+- **Backend** → FastAPI + PostgreSQL + PostGIS + Redis
+- **Mobile** → React Native + Bluetooth Low Energy (BLE)
 
-# OR using Yarn
-yarn ios
-```
+---
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+### Demo Flow
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+During our live test, here is exactly what happens behind the scenes:
 
-## Step 3: Modify your app
+1. **Trigger Alert:** We force the AI pipeline to fire a critical anomaly into the database.
+2. **Dashboard Updates:** The high-accuracy B-Tree indexed database logs the event and the cloud dashboard reflects it.
+3. **Phone Receives Alert:** A cloud-connected mobile phone captures the Redis message globally via zero-latency WebSockets.
+4. **Offline Phone Receives via BLE:** Instantly, the phone translates the JSON payload into hexadecimal formats and fires a Bluetooth burst. Nearby devices in Airplane Mode intercept the warning. The chain continues.
 
-Now that you have successfully run the app, let's make changes!
+---
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+### Why This Matters
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+This isn't just an app—it's a fundamentally new approach to **last-mile alert delivery**. By removing the reliance on stable internet, emergency response teams and governments can deploy this nationwide. It scales predictably and refuses to fail under environmental strain.
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+---
 
-## Congratulations! :tada:
+### Team
 
-You've successfully run and modified your React Native App. :partying_face:
+- **ML Engineers** - Building the Earth models.
+- **Backend Engineers** - Delivering the fast geospatial PostGIS pipelines.
+- **Mobile Developers** - Wiring the React Native offline Mesh.
+- **UI/UX** - Creating the disaster dashboards.
 
-### Now what?
+---
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+### Future Vision
 
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
->>>>>>> 124ea699e03ad771d9284dd3e1b5479259468be7
+Today, Rahat Sentinel spots extreme flooding and heat waves. Tomorrow, it becomes the backbone of multi-disaster rapid response grids globally. With direct integration into government crisis systems and nationwide deployment contracts, Sentinel stands to redefine survival strategy in the 21st century.

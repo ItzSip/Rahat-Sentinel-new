@@ -28,5 +28,9 @@ class ConnectionManager:
         
         for connection in dead_connections:
             self.disconnect(connection)
+            
+        # Explicit requested log 
+        if len(self.active_connections) - len(dead_connections) > 0:
+            logger.info(f"WS BROADCAST: Emitted alert payload to active tracking devices.")
 
 manager = ConnectionManager()
