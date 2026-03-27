@@ -1,0 +1,14 @@
+rootProject.name = 'Rahat'
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://pkgs.dev.azure.com/MicrosoftDeviceSDK/DuoSDK-Public/_packaging/Duo-SDK-Feed/maven/v1' }
+    }
+}
+
+include ':app'
+rootProject.name = "Rahat"
+include(":app")
