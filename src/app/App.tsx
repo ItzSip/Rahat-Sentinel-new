@@ -1,42 +1,88 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { PermissionsAndroid, Platform, LogBox } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import MapLibreGL from '@maplibre/maplibre-react-native';
 import RootNavigator from './navigation/RootNavigator';
-import { useAlertStore } from '../store/alertStore';
-import { useUserStore } from '../store/userStore';
-import { DEMO_ALERTS } from '../dev/demoAlerts';
-import { DEMO_USERS } from '../dev/demoUsers';
-import { DemoControlPanel } from '../dev/DemoControlPanel';
-import { LogBox } from 'react-native';
+import AuthScreen from '../screens/AuthScreen';
 
-// Suppress known warnings
+// Disable token requirement — OSM needs no token
+MapLibreGL.setAccessToken(null);
+
 LogBox.ignoreLogs([
     'The result of getSnapshot should be cached',
     'Open debugger to view warnings',
+    'MapLibre error',
+    '[MapLibre]',
 ]);
 
+// ─── Permission bootstrap ────────────────────────────────────────────────────
+
+const PERMISSIONS_TO_REQUEST: string[] = [
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+];
+
+if (Platform.OS === 'android' && (Platform.Version as number) >= 31) {
+    PERMISSIONS_TO_REQUEST.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
+    PERMISSIONS_TO_REQUEST.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+    PERMISSIONS_TO_REQUEST.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE);
+}
+
+if (Platform.OS === 'android' && (Platform.Version as number) >= 33) {
+    PERMISSIONS_TO_REQUEST.push(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+}
+
+const requestPermissions = async () => {
+    if (Platform.OS !== 'android') return;
+    try {
+        await PermissionsAndroid.requestMultiple(
+            PERMISSIONS_TO_REQUEST as Parameters<typeof PermissionsAndroid.requestMultiple>[0],
+        );
+    } catch { /* non-fatal */ }
+};
+
+// ─── Root gate ───────────────────────────────────────────────────────────────
+
 const App = () => {
-    // DEV-only: Seed demo alerts and users on app start
+    const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
+
     useEffect(() => {
-        if (__DEV__) {
-            const addAlert = useAlertStore.getState().addAlert;
-            const addUser = useUserStore.getState().addUser;
+        const bootstrap = async () => {
+            try {
+                const flag = await AsyncStorage.getItem('has_onboarded');
+                setHasOnboarded(flag === 'true');
+            } catch {
+                setHasOnboarded(false);
+            }
+            // Request permissions then start BLE mesh + location
+            await requestPermissions();
+            MapLibreGL.locationManager.start();
+            const { startScanning } = await import('../features/bluetoothMesh/bluetoothService');
+            startScanning();
+        };
 
-            DEMO_ALERTS.forEach((alert) => addAlert(alert));
-            console.log('[DEV] Seeded', DEMO_ALERTS.length, 'demo alerts');
+        bootstrap();
 
-            DEMO_USERS.forEach((user) => addUser(user));
-            console.log('[DEV] Seeded', DEMO_USERS.length, 'demo users');
-        }
-    }, []); // Empty deps = runs once on mount
+        return () => {
+            MapLibreGL.locationManager.stop();
+            import('../features/bluetoothMesh/bluetoothService').then(({ stopScanning }) => stopScanning());
+        };
+    }, []);
+
+    if (hasOnboarded === null) return null;
 
     return (
         <SafeAreaProvider>
-            <NavigationContainer>
-                <RootNavigator />
-            </NavigationContainer>
-            {/* DEV-only: Demo control panel for live alert injection */}
-            {__DEV__ && <DemoControlPanel />}
+            {hasOnboarded ? (
+                <NavigationContainer>
+                    <RootNavigator />
+                </NavigationContainer>
+            ) : (
+                <AuthScreen
+                    onComplete={() => setHasOnboarded(true)}
+                />
+            )}
         </SafeAreaProvider>
     );
 };
