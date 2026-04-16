@@ -1,113 +1,70 @@
-import { MeshPayload } from './meshTypes';
-import { Alert, AlertSource, HazardLevel } from '../../types/alerts';
-import { useAlertStore } from '../../store/alertStore';
+import { NativeModules, NativeEventEmitter } from 'react-native';
+import { ingestFrame } from '../../core/ingestionLayer';
+import { useDeviceStore } from '../../store/deviceStore';
 
-/**
- * Entry point for receiving a raw mesh payload from the Bluetooth layer.
- * This function will handle initial validation and dispatch processing.
- *
- * @param payload - The raw data packet received from another device
- * @returns void - Logic will handle state updates internally
- */
-export const receiveMeshPayload = (payload: MeshPayload): void => {
-    // 1. De-duplication Check
-    const existingAlerts = useAlertStore.getState().alerts;
-    if (existingAlerts.some((a) => a.id === payload.id)) {
-        // FLOOD PROTECTION: Mesh networks often "flood" messages to ensure delivery.
-        // We have already processed this exact alert ID.
-        // Silently drop it to prevent store duplication and user notification spam.
+const { RahatMesh } = NativeModules;
+const meshEventEmitter = RahatMesh ? new NativeEventEmitter(RahatMesh) : null;
+
+let isScanning = false;
+let peerSubscription: any = null;
+
+// PHASE 5: BLE SCANNING
+export function startScanning() {
+    if (!RahatMesh) {
+        console.warn('[BLE SERVICE] RahatMesh native module not found!');
         return;
     }
+    if (isScanning) return;
 
-    const alert = normalizeMeshPayload(payload);
+    console.log("[BLE SERVICE] Scanning started natively...");
+    isScanning = true;
+    useDeviceStore.getState().setScanning(true);
+    
+    // Call Native Bridge to start EmergencyBleService and observing peers
+    RahatMesh.startScanning();
 
-    if (alert) {
-        // Dispatch to global store
-        // access getState() to use outside of React components
-        useAlertStore.getState().addAlert(alert);
+    // Subscribe to nearby peers exactly once
+    if (meshEventEmitter && !peerSubscription) {
+        peerSubscription = meshEventEmitter.addListener('onPeersUpdated', (peers: any[]) => {
+            // Natively we send an array of maps
+            // e.g. { id, name, severity, signalLevel, signalTrend, lastSeen }
+            const mappedPeers = peers.map(p => ({
+                id: p.id,
+                lastSeen: p.lastSeen,
+                name: p.name,
+                severity: p.severity,
+                signalLevel: p.signalLevel,
+                signalTrend: p.signalTrend
+                // Natively no lat/lng yet
+            }));
+            useDeviceStore.getState().setPeers(mappedPeers);
+        });
     }
+}
 
-    // TODO: In the future, relay logic will be triggered here
-    // Verify TTL > 0 and decrement before rebroadcasting
-    // if (shouldRelayPayload(payload)) { ... }
-};
+export function stopScanning() {
+    if (!RahatMesh) return;
+    
+    RahatMesh.stopScanning();
+    isScanning = false;
+    useDeviceStore.getState().setScanning(false);
+    console.log("[BLE SERVICE] Scanning native completely halted.");
 
-/**
- * Transforms a raw MeshPayload into a standardized Alert
- * that the application can consume and display.
- *
- * @param payload - The raw mesh payload containing unknown alertData
- * @returns Alert | null - The valid alert object or null if parsing fails
- */
-export const normalizeMeshPayload = (payload: MeshPayload): Alert | null => {
-    try {
-        const { alertData, id, createdAt } = payload;
-
-        // Defensive check: ensure alertData is an object
-        if (typeof alertData !== 'object' || alertData === null) {
-            return null;
-        }
-
-        // Cast to expected shape (defensively)
-        const data = alertData as Partial<Alert>;
-
-        // Required field validation
-        if (!data.title || !data.description || !data.hazardLevel || !data.location) {
-            return null;
-        }
-
-        // Defensive Location Checks
-        const lat = Number(data.location.latitude);
-        const lon = Number(data.location.longitude);
-        const rad = Number(data.location.radius);
-
-        // Ensure numbers are finite and valid
-        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(rad)) {
-            return null;
-        }
-
-        // Construct valid Alert object
-        const alert: Alert = {
-            id: id, // Use mesh ID for alert ID to ensure consistency
-            source: AlertSource.BLUETOOTH, // Always forced source
-            hazardLevel: [
-                HazardLevel.LOW,
-                HazardLevel.MODERATE,
-                HazardLevel.SEVERE,
-                HazardLevel.CRITICAL,
-            ].includes(data.hazardLevel as HazardLevel)
-                ? (data.hazardLevel as HazardLevel)
-                : HazardLevel.LOW, // Fallback safely
-            location: {
-                latitude: lat,
-                longitude: lon,
-                radius: rad,
-            },
-            title: String(data.title).substring(0, 100), // Sanitize length
-            description: String(data.description).substring(0, 500),
-            timestamp: createdAt, // Use mesh creation time
-            expiresAt: createdAt + 1000 * 60 * 60 * 24, // Default 24h expiry if not set
-            verified: false, // Bluetooth alerts are always unverified by default
-        };
-
-        return alert;
-    } catch (error) {
-        console.error('Failed to normalize mesh payload:', error);
-        return null;
+    if (peerSubscription) {
+        peerSubscription.remove();
+        peerSubscription = null;
     }
-};
+}
 
-/**
- * Determines if a received payload should be relayed to other devices.
- * Checks Time-To-Live (TTL).
- *
- * @param payload - The received mesh payload
- * @returns boolean - True if the message should be rebroadcasted
- */
-export const shouldRelayPayload = (payload: MeshPayload): boolean => {
-    // Basic TTL check
-    if (typeof payload.ttl === 'number' && payload.ttl > 0) {
-        return true;
-    }
-    return false;
-};
+// PHASE 5: ON RECEIVE (Triggered natively when BLE mesh receives a chunk)
+export function onReceive(data: string) {
+    // Send string payload directly into ingestion layer
+    ingestFrame(data);
+}
+
+// PHASE 5: BLE SEND (No retries, lightweight, strictly pass-through to native)
+export function bleSend(frame: string) {
+    if (!RahatMesh) return;
+    console.log(`[BLE TX NATIVE] Sending frame: ${frame}`);
+    RahatMesh.bleSend(frame);
+}

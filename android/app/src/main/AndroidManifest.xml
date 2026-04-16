@@ -27,6 +27,8 @@
       android:usesCleartextTraffic="true"
       android:supportsRtl="true">
         
+
+
         <service
             android:name=".service.EmergencyForegroundService"
             android:enabled="true"
