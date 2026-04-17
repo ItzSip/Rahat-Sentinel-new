@@ -1,0 +1,92 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp'
+    id 'com.google.gms.google-services'
+    id 'com.facebook.react'
+}
+
+react {
+    autolinkLibrariesWithApp()
+}
+
+repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://pkgs.dev.azure.com/MicrosoftDeviceSDK/DuoSDK-Public/_packaging/Duo-SDK-Feed/maven/v1' }
+}
+
+android {
+    namespace "com.rahat"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.rahat"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    packagingOptions {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    // React Native — core
+    implementation("com.facebook.react:react-android")
+    implementation("com.facebook.react:hermes-android")
+
+    // Core Android
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'androidx.security:security-crypto:1.0.0'
+
+    // Location
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
+
+    // Azure Auth (MSAL)
+    implementation 'com.microsoft.identity.client:msal:5.1.0'
+
+    // Firebase (explicit versions — react-native-firebase manages its own BOM)
+    implementation 'com.google.firebase:firebase-auth-ktx:22.3.0'
+    implementation 'com.google.firebase:firebase-firestore-ktx:24.10.0'
+
+    // Play Services Auth
+    implementation 'com.google.android.gms:play-services-auth:20.7.0'
+
+    // JSON
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // Coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Room Database
+    def room_version = "2.6.1"
+    implementation "androidx.room:room-runtime:$room_version"
+    implementation "androidx.room:room-ktx:$room_version"
+    ksp "androidx.room:room-compiler:$room_version"
+}
