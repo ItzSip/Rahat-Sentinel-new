@@ -1,0 +1,11 @@
+# Ignore the Python bubble
+venv/
+__pycache__/
+
+# Ignore massive data files
+data/
+*.csv
+*.tif
+
+# Ignore passwords
+.env
