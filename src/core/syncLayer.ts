@@ -1,5 +1,13 @@
 import { RahatEvent } from './types';
 import { setOutboundListener } from './eventEngine';
+import { encodeLoRaEvent } from './loraCodec';
+
+export type TransportMode = 'BLE' | 'LORA';
+let transportMode: TransportMode = 'BLE';
+
+export function setTransportMode(mode: TransportMode) {
+    transportMode = mode;
+}
 
 const BATCH_MAX = 10;
 const HARD_LIMIT = 20;
@@ -40,10 +48,12 @@ export function setTransportStrategy(strategy: (frame: string) => void) {
 }
 
 function sendFrame(frame: string) {
+    console.log("[SYNC SEND]", frame);
     if (customTransport) {
         customTransport(frame);
     } else {
-        console.log("[SYNC OUT]", frame);
+        // No transport wired yet — frame stays local
+        console.warn("[SYNC SEND] No transport strategy set — frame not transmitted");
     }
 }
 
@@ -99,6 +109,19 @@ export const handleEvent = (event: RahatEvent) => {
     // 1. Drop expired
     if (isExpired(event)) return;
 
+    // LoRa path: one event per packet, no batching, no size accumulation
+    if (transportMode === 'LORA') {
+        const packet = encodeLoRaEvent(event);
+        if (packet.length > 100) {
+            console.log('[LORA DROP] Packet too large:', packet.length);
+            return;
+        }
+        console.log('[LORA TX]', packet);
+        sendFrame(packet);
+        return;
+    }
+
+    // BLE path — all batching logic below is unchanged
     // 2. SOS override logic -> immediate send
     if (event.type === 'SOS') {
         flushBatch(); // Flush existing queue first

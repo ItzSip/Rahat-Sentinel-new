@@ -29,14 +29,16 @@ class PeerManager(private val scope: CoroutineScope) {
 
     // Internal Peer State
     private class PeerData(
-        val macAddress: String,
-        var currentEphId: String,
+        var currentMacAddress: String,
+        val currentEphId: String,
         var severity: Int
     ) {
         var lastSeen = System.currentTimeMillis()
         val rssiHistory = mutableListOf<Int>()
         var lastUiUpdateTime = 0L
         var currentTrend = SignalTrend.STABLE
+        var latitude: Double? = null
+        var longitude: Double? = null
 
         fun addRssi(rssi: Int) {
             rssiHistory.add(rssi)
@@ -71,7 +73,7 @@ class PeerManager(private val scope: CoroutineScope) {
             }
 
             if (newTrend != currentTrend) {
-                Log.i("RAHAT_PEER_MANAGER", "TREND_CHANGE: Peer $macAddress is now $newTrend (Slope: ${"%.2f".format(rawSlope)})")
+                Log.i("RAHAT_PEER_MANAGER", "TREND_CHANGE: Peer $currentEphId is now $newTrend (Slope: ${"%.2f".format(rawSlope)})")
                 currentTrend = newTrend
             }
             return newTrend
@@ -109,18 +111,25 @@ class PeerManager(private val scope: CoroutineScope) {
         mac: String,
         ephId: String,
         severity: Int,
-        isMoving: Boolean, // Ignored as per new contract
-        rawRssi: Int
+        isMoving: Boolean,
+        rawRssi: Int,
+        lat: Double? = null,
+        lng: Double? = null
     ) {
         val now = System.currentTimeMillis()
-        
-        val peer = activePeers.getOrPut(mac) {
-            Log.i(TAG, "PEER_DISCOVERED: $mac")
+
+        val peer = activePeers.getOrPut(ephId) {
+            Log.i(TAG, "PEER_DISCOVERED: EphID $ephId (MAC $mac)")
             PeerData(mac, ephId, severity)
         }
 
-        peer.currentEphId = ephId
+        peer.currentMacAddress = mac
+        peer.severity = severity
         peer.addRssi(rawRssi)
+        if (lat != null && lng != null) {
+            peer.latitude = lat
+            peer.longitude = lng
+        }
 
         // UI UPDATE THROTTLING
         if (now - peer.lastUiUpdateTime >= UI_UPDATE_INTERVAL_MS) {
@@ -140,12 +149,14 @@ class PeerManager(private val scope: CoroutineScope) {
             val filteredRssi = data.getFilteredRssi()
             PeerState(
                 rId = "PEER_${data.currentEphId.take(6)}",
-                name = "Nearby Device (${data.macAddress.takeLast(4)})",
+                name = "Nearby Device (${data.currentMacAddress.takeLast(4)})",
                 severity = if (data.severity == 2) "HIGH" else "NORMAL",
                 signalLevel = data.getSignalLevel(filteredRssi),
                 signalTrend = data.computeTrend(),
                 lastSeen = data.lastSeen,
-                source = PeerSource.DIRECT
+                source = PeerSource.DIRECT,
+                latitude = data.latitude,
+                longitude = data.longitude
             )
         }
         MeshRepository.setPeers(peers)

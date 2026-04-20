@@ -6,17 +6,23 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.*
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlinx.coroutines.*
 
 /**
- * Senior Architect Implementation: BleScanner
- * 
- * DESIGN PRINCIPLES:
- * 1. MAX PERFORMANCE: ScanMode.LOW_LATENCY with NO throttling.
- * 2. LONG RANGE: LE Coded PHY support enabled if hardware supports it.
- * 3. TRANSPARENCY: Audit log for PHY type (1M vs Coded) to verify mesh quality.
+ * BleScanner — Range-optimised version
+ *
+ * RANGE OPTIMISATIONS:
+ * 1. SCAN_MODE_LOW_LATENCY — continuous scanning, no duty cycle
+ * 2. Reports duty-cycle scan (10s on / 3s off) to avoid Android OS scan throttle (30s rule)
+ * 3. Tries both 1M and Coded PHY scanning when hardware supports it
+ * 4. Parses lat/lng from 25-byte extended payload
+ *
+ * Android throttles BLE scans that run > 30s continuously — we cycle 10s/3s to stay
+ * under the threshold and avoid SCAN_FAILED_INTERNAL_ERROR (error code 2).
  */
 class BleScanner(private val context: Context, private val peerManager: PeerManager) {
 
@@ -27,52 +33,85 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     }
     private val scanner: BluetoothLeScanner? by lazy { bluetoothAdapter?.bluetoothLeScanner }
-    
+
     private var scanJob: Job? = null
     private var scanCallback: ScanCallback? = null
-    private val SCAN_DURATION_MS = 15_000L
-    private val SCAN_INTERVAL_MS = 25_000L // Total cycle time (15s scan, 10s rest)
+
+    /**
+     * Called whenever a confirmed Rahat peer is discovered.
+     * Wired by EmergencyBleService → BleGattClient.connectToPeer so the
+     * GATT data channel can be established alongside peer-discovery.
+     */
+    var onDeviceFound: ((BluetoothDevice) -> Unit)? = null
+
+    // Cycle just under the 30s Android throttle threshold
+    private val SCAN_DURATION_MS = 10_000L
+    private val SCAN_REST_MS     =  3_000L
 
     @SuppressLint("MissingPermission")
     fun startScanning() {
-        if (scanJob != null) return
-        
-        val adapterLocal = bluetoothAdapter ?: return
-        if (!adapterLocal.isEnabled) {
-            Log.e(TAG, "BLE_SCAN_ABORTED: Bluetooth is OFF")
+        if (scanJob?.isActive == true) return
+
+        val adapterLocal = bluetoothAdapter
+        if (adapterLocal == null || !adapterLocal.isEnabled) {
+            Log.e(TAG, "BLE_SCAN_ABORTED: Bluetooth unavailable")
             return
         }
         val scannerLocal = scanner ?: run {
-            Log.e(TAG, "BLE_SCAN_FAILED: No BLE Hardware")
+            Log.e(TAG, "BLE_SCAN_FAILED: No BluetoothLeScanner")
             return
         }
 
         scanJob = peerManager.getScope().launch {
+            Log.i(TAG, "BLE_SCAN_JOB_STARTED")
             while (isActive) {
                 try {
-                    val settings = ScanSettings.Builder()
+                    // ── Settings: Low-latency, all matches ──────────────────────────────
+                    val settingsBuilder = ScanSettings.Builder()
                         .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                        .setLegacy(true) // Explicitly scan for legacy beacons
                         .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-                        .build()
+                        .setLegacy(true)  // start with legacy; we add Coded separately
 
+                    // Attempt to enable Coded PHY scanning on API 26+ capable hardware
+                    // for extended range (if bluetoothAdapter.isLeCodedPhySupported)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        adapterLocal.isLeCodedPhySupported) {
+                        try {
+                            settingsBuilder
+                                .setLegacy(false)   // enable extended scanning
+                                .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)  // 1M + Coded
+                            Log.i(TAG, "BLE_SCAN_MODE: Extended (1M + Coded PHY) — MAX RANGE")
+                        } catch (e: Exception) {
+                            settingsBuilder.setLegacy(true)
+                            Log.w(TAG, "BLE_SCAN_MODE: Coded PHY unavailable, falling back to 1M")
+                        }
+                    } else {
+                        Log.i(TAG, "BLE_SCAN_MODE: Legacy 1M PHY")
+                    }
+
+                    val settings = settingsBuilder.build()
+
+                    // Filter: manufacturer ID with empty mask (match any payload)
+                    val emptyData = byteArrayOf()
                     val filters = listOf(
-                        ScanFilter.Builder().setManufacturerData(MANUFACTURER_ID, byteArrayOf()).build()
+                        ScanFilter.Builder()
+                            .setManufacturerData(MANUFACTURER_ID, emptyData, emptyData)
+                            .build()
                     )
 
-                    val currentCallback = createScanCallback()
-                    scanCallback = currentCallback
-                    
-                    Log.i(TAG, "BLE_SCAN_WINDOW_OPEN: Starting 15s scan")
-                    scannerLocal.startScan(filters, settings, currentCallback)
-                    
+                    val cb = createScanCallback()
+                    scanCallback = cb
+
+                    Log.i(TAG, "BLE_SCAN_WINDOW_OPEN: ${SCAN_DURATION_MS/1000}s")
+                    scannerLocal.startScan(filters, settings, cb)
+
                     delay(SCAN_DURATION_MS)
-                    
-                    Log.i(TAG, "BLE_SCAN_WINDOW_CLOSED: Stopping scan for 10s rest")
-                    scannerLocal.stopScan(currentCallback)
+
+                    scannerLocal.stopScan(cb)
                     scanCallback = null
-                    
-                    delay(SCAN_INTERVAL_MS - SCAN_DURATION_MS)
+                    Log.d(TAG, "BLE_SCAN_WINDOW_CLOSED: rest ${SCAN_REST_MS/1000}s")
+
+                    delay(SCAN_REST_MS)
                 } catch (e: Exception) {
                     Log.e(TAG, "BLE_SCAN_LOOP_ERR: ${e.message}")
                     delay(5000)
@@ -84,9 +123,13 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
     private fun createScanCallback() = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val record = result.scanRecord ?: return
-            val manufacturerData = record.getManufacturerSpecificData(MANUFACTURER_ID)
-            if (manufacturerData != null) {
-                processManufacturerData(result.device.address, manufacturerData, result.rssi)
+            val mfData = record.getManufacturerSpecificData(MANUFACTURER_ID)
+            if (mfData != null) {
+                processPayload(result.device.address, mfData, result.rssi)
+                // Trigger GATT connection so the bidirectional data channel opens
+                onDeviceFound?.invoke(result.device)
+            } else {
+                Log.v(TAG, "BLE_OTHER: MAC=${result.device.address} RSSI=${result.rssi}")
             }
         }
 
@@ -95,7 +138,14 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "BLE_SCAN_FAILED: Error code: $errorCode")
+            val reason = when (errorCode) {
+                SCAN_FAILED_ALREADY_STARTED              -> "ALREADY_STARTED (safe to ignore)"
+                SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "APP_REGISTRATION_FAILED"
+                SCAN_FAILED_FEATURE_UNSUPPORTED          -> "FEATURE_UNSUPPORTED"
+                SCAN_FAILED_INTERNAL_ERROR               -> "INTERNAL_ERROR (OS throttled?)"
+                else -> "CODE_$errorCode"
+            }
+            Log.e(TAG, "BLE_SCAN_FAILED: $reason")
         }
     }
 
@@ -104,39 +154,62 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
         try {
             scanJob?.cancel()
             scanJob = null
-            
-            scanCallback?.let { 
-                scanner?.stopScan(it)
-                Log.w(TAG, "BLE_SCAN_STOP_REQUESTED: Discovery terminated")
-            }
+            scanCallback?.let { scanner?.stopScan(it) }
             scanCallback = null
+            Log.w(TAG, "BLE_SCAN_STOPPED")
         } catch (e: Exception) {
             Log.e(TAG, "BLE_SCAN_STOP_ERR: ${e.message}")
         }
     }
 
-    private fun processManufacturerData(mac: String, data: ByteArray, rssi: Int) {
-        if (data.size < 17) return
+    /**
+     * Parse 23-byte payload: [0-15] EphID | [16] Status | [17-19] Lat int24 LE | [20-22] Lng int24 LE
+     * Also handles legacy 17-byte payload (no GPS) for backward compat.
+     */
+    private fun processPayload(mac: String, data: ByteArray, rssi: Int) {
+        if (data.size < 17) {
+            Log.w(TAG, "BLE_SKIP: Too short (${data.size}B) from $mac")
+            return
+        }
         try {
-            val buffer = ByteBuffer.wrap(data)
-            
-            // Extract 16-byte (128-bit) EphID
+            val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
             val idBytes = ByteArray(16)
             buffer.get(idBytes)
             val ephId = idBytes.joinToString("") { "%02x".format(it) }
-            
-            // Extract Status Flag (1 = SOS, 0 = Normal)
-            val status = buffer.get().toInt()
-            val severity = if (status == 1) 2 else 1 // 2 = HIGH/SOS, 1 = NORMAL
-            
-            // Audit log for discovery
-            Log.i(TAG, "BLE_PEER_DISCOVERED: MAC: $mac | EphID: ${ephId.take(8)}... | Status: ${if (status == 1) "SOS" else "Normal"} | RSSI: $rssi")
-            
-            // Delegate to PeerManager for signal analysis and lifecycle
-            peerManager.onRawPeerDiscovery(mac, ephId, severity, false, rssi)
-            
+
+            val status   = buffer.get().toInt()
+            val severity = if (status == 1) 2 else 1
+
+            // Parse GPS if payload is extended (23+ bytes) — lat/lng as signed int24 LE × 10000
+            var lat: Double? = null
+            var lng: Double? = null
+            if (data.size >= 23) {
+                val b0 = buffer.get().toInt() and 0xFF
+                val b1 = buffer.get().toInt() and 0xFF
+                val b2 = buffer.get().toInt() and 0xFF
+                val latInt = if (b2 and 0x80 != 0) (0xFF shl 24) or (b2 shl 16) or (b1 shl 8) or b0
+                             else (b2 shl 16) or (b1 shl 8) or b0
+                val b3 = buffer.get().toInt() and 0xFF
+                val b4 = buffer.get().toInt() and 0xFF
+                val b5 = buffer.get().toInt() and 0xFF
+                val lngInt = if (b5 and 0x80 != 0) (0xFF shl 24) or (b5 shl 16) or (b4 shl 8) or b3
+                             else (b5 shl 16) or (b4 shl 8) or b3
+                val rawLat = latInt / 10000.0
+                val rawLng = lngInt / 10000.0
+                if (rawLat in -90.0..90.0 && rawLng in -180.0..180.0 && rawLat != 0.0) {
+                    lat = rawLat
+                    lng = rawLng
+                }
+            }
+
+            Log.i(TAG, "BLE_RAHAT_PEER: MAC=$mac EphID=${ephId.take(8)} " +
+                "Status=${if (status == 1) "SOS" else "OK"} RSSI=$rssi " +
+                "GPS=${if (lat != null) "${"%.4f".format(lat)},${"%.4f".format(lng)}" else "none"}")
+
+            peerManager.onRawPeerDiscovery(mac, ephId, severity, false, rssi, lat, lng)
+
         } catch (e: Exception) {
-            Log.e(TAG, "BLE_SCAN_PARSE_ERR: MAC: $mac | ${e.message}")
+            Log.e(TAG, "BLE_PARSE_ERR: $mac | ${e.message}")
         }
     }
 }

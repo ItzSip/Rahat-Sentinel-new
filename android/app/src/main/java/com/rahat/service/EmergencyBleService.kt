@@ -17,6 +17,10 @@ import com.rahat.data.repo.PeerResolver
 import com.rahat.data.model.PeerState
 import com.rahat.data.model.PeerSource
 import com.rahat.service.ble.BleAdvertiser
+import com.rahat.service.ble.BleChannels
+import com.rahat.service.ble.DeviceRole
+import com.rahat.service.ble.BleGattClient
+import com.rahat.service.ble.BleGattServer
 import com.rahat.service.ble.BleScanner
 import com.rahat.service.ble.PeerManager
 import com.rahat.security.IdentityManager
@@ -48,6 +52,8 @@ class EmergencyBleService : Service() {
     private lateinit var identityManager: IdentityManager
     private lateinit var peerResolver: PeerResolver
     private lateinit var database: RahatDatabase
+    private lateinit var gattServer: BleGattServer
+    private lateinit var gattClient: BleGattClient
     
     // Rotation Settings
     private val ROTATION_INTERVAL_MS = IdentityManager.TIME_WINDOW_MS // 10 Minutes
@@ -57,6 +63,7 @@ class EmergencyBleService : Service() {
     private var lastLng = 0.0
 
     private var orchestrationJob: Job? = null
+    private var currentEphId: String? = null
     
     private val bluetoothStateReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -86,10 +93,14 @@ class EmergencyBleService : Service() {
         
         // Initialize PeerManager (The Brain)
         peerManager = PeerManager(serviceScope)
-        
+
         // Initialize BLE Comms
         advertiser = BleAdvertiser(this)
         scanner = BleScanner(this, peerManager)
+
+        // Initialize GATT data channel (bidirectional event frame transport)
+        gattServer = BleGattServer(this)
+        gattClient = BleGattClient(this)
         
         // Register Bluetooth State Monitor
         val filter = android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -102,8 +113,20 @@ class EmergencyBleService : Service() {
         Log.i(TAG, "BLE_SERVICE_ON_START_COMMAND: Activating Mesh")
         
         intent?.let {
-            lastLat = it.getDoubleExtra("lat", 0.0)
-            lastLng = it.getDoubleExtra("lng", 0.0)
+            val newLat = it.getDoubleExtra("lat", 0.0)
+            val newLng = it.getDoubleExtra("lng", 0.0)
+            if (newLat != 0.0 || newLng != 0.0) {
+                lastLat = newLat
+                lastLng = newLng
+                
+                // Immediately update advertiser with new location if it's already running
+                currentEphId?.let { ephId ->
+                    if (this::advertiser.isInitialized) {
+                        Log.d(TAG, "BLE_LOCATION_UPDATE: Pushing new GPS to advertiser (${"%.4f".format(lastLat)}, ${"%.4f".format(lastLng)})")
+                        advertiser.startOrUpdateAdvertising(ephId, currentSeverity, lastLat, lastLng)
+                    }
+                }
+            }
         }
 
         if (checkAllPermissions()) {
@@ -117,42 +140,82 @@ class EmergencyBleService : Service() {
 
     private fun startMeshOrchestration() {
         if (orchestrationJob?.isActive == true) return
-        
-        // 1. START SCANNING (Runs indefinitely)
-        scanner.startScanning()
 
-        // 2. START ADVERTISING & ROTATION LOOP
         orchestrationJob = serviceScope.launch {
-            Log.i(TAG, "BLE_MESH_ORCHESTRATOR: Starting Persistent Advertising Session")
-            while (isActive) {
-                try {
-                    val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
-                    if (adapter?.isEnabled == true) {
-                        val secret = identityManager.getOrCreateDeviceSecret()
-                        val selfEphId = identityManager.generateEphemeralIdAtOffset(secret, ROTATION_INTERVAL_MS, 0L)
-                        
-                        Log.i(TAG, "BLE_EPHID_ROTATION_EVENT: New ID: $selfEphId [Rotation Target: ${ROTATION_INTERVAL_MS/60000} mins]")
-                        
-                        // Update Advertiser (Will not restart if same, will use AdvertisingSet if active)
-                        advertiser.startOrUpdateAdvertising(selfEphId, currentSeverity, false)
-                    } else {
-                        Log.w(TAG, "BLE_ORCHESTRATION_WAITING: Bluetooth is OFF")
+            Log.i(TAG, "BLE_MESH_ORCHESTRATOR: Starting — waiting for Bluetooth to be ON")
+
+            // RETRY LOOP: Poll every 2s until BT is ON (max 60s)
+            val deadline = System.currentTimeMillis() + 60_000L
+            while (System.currentTimeMillis() < deadline) {
+                val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+                if (adapter?.isEnabled == true) break
+                Log.w(TAG, "BLE_MESH_ORCHESTRATOR: Waiting for BT...")
+                delay(2000)
+            }
+
+            val adapterCheck = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+            if (adapterCheck?.isEnabled != true) {
+                Log.e(TAG, "BLE_MESH_ORCHESTRATOR: BT never came ON after 60s. Stopping.")
+                return@launch
+            }
+
+            val role = BleChannels.role
+            Log.i(TAG, "BLE_MESH_ORCHESTRATOR: Role=${role.name}")
+
+            // ── SENDER: host GATT server + advertise ────────────────────────────
+            if (role == DeviceRole.SENDER || role == DeviceRole.FULL) {
+                gattServer.start()
+                BleChannels.sender = { frame -> gattClient.sendToAll(frame) }
+                Log.i(TAG, "GATT_SERVER_READY")
+            }
+
+            // ── RECEIVER: scan + connect as GATT client ─────────────────────────
+            if (role == DeviceRole.RECEIVER || role == DeviceRole.FULL) {
+                scanner.onDeviceFound = { device -> gattClient.connectToPeer(device) }
+                scanner.startScanning()
+                Log.i(TAG, "BLE_SCANNER_STARTED")
+            }
+
+            // ── Advertise + rotate EphID loop (SENDER or FULL only) ─────────────
+            if (role == DeviceRole.SENDER || role == DeviceRole.FULL) {
+                while (isActive) {
+                    try {
+                        val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+                        if (adapter?.isEnabled == true) {
+                            val secret = identityManager.getOrCreateDeviceSecret()
+                            val selfEphId = identityManager.generateEphemeralIdAtOffset(secret, ROTATION_INTERVAL_MS, 0L)
+                            currentEphId = selfEphId
+
+                            Log.i(TAG, "BLE_EPHID_ROTATION_EVENT: New ID: $selfEphId [${ROTATION_INTERVAL_MS/60000} min rotation]")
+                            advertiser.startOrUpdateAdvertising(selfEphId, currentSeverity, lastLat, lastLng)
+                        } else {
+                            Log.w(TAG, "BLE_ORCHESTRATION_WAITING: Bluetooth is OFF — pausing advertising")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "BLE_ORCHESTRATION_ERROR: ${e.message}")
                     }
-                    
-                } catch (e: Exception) {
-                    Log.e(TAG, "BLE_ORCHESTRATION_ERROR: ${e.message}")
+                    delay(ROTATION_INTERVAL_MS - 5000)
                 }
-                
-                // Sleep for the rotation interval or a bit less to stay ahead of window
-                delay(ROTATION_INTERVAL_MS - 5000) 
+            } else {
+                // RECEIVER-only: keep coroutine alive so scanner stays running
+                while (isActive) { delay(60_000) }
             }
         }
     }
 
     private fun stopMeshOrchestration() {
+        val role = BleChannels.role
         orchestrationJob?.cancel()
-        scanner.stopScanning()
-        advertiser.stopAdvertising()
+        if (role == DeviceRole.RECEIVER || role == DeviceRole.FULL) {
+            scanner.stopScanning()
+            scanner.onDeviceFound = null
+            gattClient.stop()
+        }
+        if (role == DeviceRole.SENDER || role == DeviceRole.FULL) {
+            advertiser.stopAdvertising()
+            gattServer.stop()
+            BleChannels.sender = null
+        }
     }
 
     private fun checkAllPermissions(): Boolean {

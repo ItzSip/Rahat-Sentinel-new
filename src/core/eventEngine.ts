@@ -1,13 +1,20 @@
 import { RahatEvent } from './types';
+import { getDeviceIdSync } from './deviceIdentity';
 
 const MAX_SEEN_IDS = 100;
 const MAX_EVENTS = 50;
 const MAX_HOPS = 3;
 
+// Minimum gap between outgoing LOCATION events (battery guard)
+const LOCATION_EMIT_INTERVAL_MS = 8_000;
+let lastLocationEmitMs = 0;
+
 // State (In-Memory, strictly bounded)
 const seenEventIds = new Set<string>();
 let storedEvents: RahatEvent[] = [];
 let outboundListener: ((event: RahatEvent) => void) | null = null;
+// Separate hook for UI/store layer — fired after a LOCATION passes all checks
+let locationListener: ((event: RahatEvent) => void) | null = null;
 let relayCount = 0;
 
 export const getRelayCount = () => relayCount;
@@ -37,6 +44,11 @@ export const setOutboundListener = (fn: (event: RahatEvent) => void) => {
   outboundListener = fn;
 };
 
+/** Called by locationBridge — fires after a LOCATION event passes all validation. */
+export const setLocationListener = (fn: (event: RahatEvent) => void) => {
+  locationListener = fn;
+};
+
 export const processIncomingEvent = (event: RahatEvent): void => {
   // 1. Drop expired BEFORE processing
   if (isExpired(event)) return;
@@ -56,7 +68,7 @@ export const processIncomingEvent = (event: RahatEvent): void => {
 
   // @ts-ignore
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log("[EVENT]", processedEvent.type, processedEvent.id);
+    console.log("[EVENT RECEIVED]", processedEvent.id);
   }
 
   // Track ID (LRU eviction when full)
@@ -84,7 +96,12 @@ export const processIncomingEvent = (event: RahatEvent): void => {
     storedEvents.pop(); 
   }
 
-  // 7. Dispatch if allowed
+  // 7. Notify location bridge (UI store update, separate from transport)
+  if (processedEvent.type === 'LOCATION' && locationListener) {
+    locationListener(processedEvent);
+  }
+
+  // 8. Dispatch to transport if allowed
   if (shouldBroadcast(processedEvent) && outboundListener) {
     outboundListener(processedEvent);
   }
@@ -94,17 +111,25 @@ export const processIncomingEvent = (event: RahatEvent): void => {
 const randomId = () => `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
 export function emitTestEvent(type: 'SOS' | 'LOCATION') {
+    // Throttle LOCATION to at most one per 8 seconds (battery guard)
+    if (type === 'LOCATION') {
+        const now = Date.now();
+        if (now - lastLocationEmitMs < LOCATION_EMIT_INTERVAL_MS) return;
+        lastLocationEmitMs = now;
+    }
+
     const event: RahatEvent = {
         id: randomId(),
         type,
         payload: type === 'LOCATION' ? {
             lat: 22.7196,
-            lng: 75.8577
+            lng: 75.8577,
+            accuracy: 15, // metres (simulated)
         } : {},
         timestamp: Date.now(),
-        ttl: 30, // 30 seconds
+        ttl: type === 'LOCATION' ? 120 : 30, // LOCATION stays in mesh 2 min
         priority: type === 'SOS' ? 3 : 2,
-        origin: "local-device",
+        origin: getDeviceIdSync(), // unique per install — set by deviceIdentity bootstrap
         hops: 0,
     };
 

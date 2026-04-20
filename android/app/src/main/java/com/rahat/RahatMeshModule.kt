@@ -6,6 +6,8 @@ import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.rahat.data.repo.MeshRepository
 import com.rahat.service.EmergencyBleService
+import com.rahat.service.ble.BleChannels
+import com.rahat.service.ble.DeviceRole
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 
@@ -19,6 +21,11 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
     @ReactMethod
     fun startScanning() {
         Log.i("RahatMeshModule", "startScanning triggered from JS")
+
+        // Wire received-frame callback: GATT server → JS "onDataReceived" event.
+        // Set before starting the service so no frames are missed.
+        BleChannels.onFrameReceived = { frame -> sendEventToJS(frame) }
+
         val intent = Intent(reactContext, EmergencyBleService::class.java)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             reactContext.startForegroundService(intent)
@@ -37,7 +44,8 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
 
     @ReactMethod
     fun bleSend(payload: String) {
-        Log.i("RahatMeshModule", "bleSend triggered: $payload")
+        Log.d("RahatMeshModule", "[BLE TX] $payload")
+        BleChannels.send(payload)
     }
 
     @ReactMethod
@@ -50,6 +58,24 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
         } else {
             reactContext.startService(intent)
         }
+    }
+
+    /**
+     * Set device role before calling startScanning().
+     * role: "SENDER" | "RECEIVER" | "FULL"
+     * SENDER   → hosts GATT server + advertises only (no scan, no GATT client)
+     * RECEIVER → scans + connects as GATT client only (no advertise, no GATT server)
+     * FULL     → both sides active (default)
+     */
+    @ReactMethod
+    fun setDeviceRole(role: String) {
+        val parsed = when (role.uppercase()) {
+            "SENDER"   -> DeviceRole.SENDER
+            "RECEIVER" -> DeviceRole.RECEIVER
+            else       -> DeviceRole.FULL
+        }
+        BleChannels.role = parsed
+        Log.i("RahatMeshModule", "DEVICE_ROLE_SET: ${parsed.name}")
     }
 
     @ReactMethod
@@ -76,12 +102,26 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
                     map.putString("signalLevel", p.signalLevel.name)
                     map.putString("signalTrend", p.signalTrend.name)
                     map.putDouble("lastSeen", p.lastSeen.toDouble())
-                    // Location will be null natively unless transmitted inside BLE payload
+                    if (p.latitude != null && p.longitude != null) {
+                        map.putDouble("latitude", p.latitude)
+                        map.putDouble("longitude", p.longitude)
+                    }
                     array.pushMap(map)
                 }
                 sendEvent("onPeersUpdated", array)
             }
         }
+    }
+
+    /**
+     * Delivers a received BLE event frame to the JS NativeEventEmitter as "onDataReceived".
+     * Called from BleChannels.onFrameReceived on whatever thread BleGattServer fires on.
+     */
+    fun sendEventToJS(frame: String) {
+        Log.d("RahatMeshModule", "[BLE RX → JS] ${frame.take(80)}")
+        reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit("onDataReceived", frame)
     }
 
     private fun sendEvent(eventName: String, params: WritableArray?) {

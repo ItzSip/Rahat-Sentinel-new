@@ -1,4 +1,4 @@
-import React, { useState, useMemo, memo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, memo, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     StyleSheet,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NativeModules } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../app/navigation/RootNavigator';
@@ -21,36 +22,55 @@ import { useDeviceStore } from '../store/deviceStore';
 import { useUserStore } from '../store/userStore';
 import { emitTestEvent } from '../core/eventEngine';
 
+// ---------------------------------------------------------------------------
+// Geo helpers
+// ---------------------------------------------------------------------------
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const R = 6_371_000;
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Approximate a circle (in metres) as a 32-point GeoJSON Polygon.
+// Coordinates are [lng, lat] as required by the GeoJSON spec.
+function createAccuracyCircle(lat: number, lng: number, radiusM: number) {
+    const PTS = 32;
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const coords: [number, number][] = [];
+    for (let i = 0; i <= PTS; i++) {
+        const angle = (i / PTS) * 2 * Math.PI;
+        const dLat = (radiusM / 111_320) * Math.cos(angle);
+        const dLng = (radiusM / (111_320 * Math.cos(toRad(lat)))) * Math.sin(angle);
+        coords.push([lng + dLng, lat + dLat]); // [lng, lat] ← GeoJSON order
+    }
+    return {
+        type: 'Feature' as const,
+        geometry: { type: 'Polygon' as const, coordinates: [coords] },
+        properties: {},
+    };
+}
+
+const JITTER_M         =  5;  // < 5 m  → pure GPS noise, ignore completely
+const SNAP_M           = 10;  // ≥ 10 m from last render → accept, re-render
+const DEFAULT_ACC_M    = 30;  // fallback accuracy radius when device doesn't report it
+
+// MapLibre paint objects extracted to module-level to satisfy react-native/no-inline-styles
+const ACCURACY_FILL_STYLE   = { fillColor: 'rgba(50,173,230,0.12)', fillOutlineColor: Colors.cyan };
+const PEER_OUTLINE_STYLE    = { circleRadius: 10, circleColor: '#ffffff' };
+const PEER_FILL_STYLE       = {
+    circleRadius: 7,
+    // MapLibre expression — cast needed because TS can't infer nested array as Expression
+    circleColor: ['match', ['get', 'severity'], 'HIGH', Colors.red, 'CRITICAL', Colors.red, Colors.orange] as any,
+};
+
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-
-// ---------------------------------------------------------------------------
-// Custom map markers — memoized, no re-renders on map pan/zoom
-// ---------------------------------------------------------------------------
-const PeerMarker = memo(() => <View style={markerStyles.peerDot} />);
-const UserMarker = memo(() => <View style={markerStyles.userDot} />);
-
-const markerStyles = StyleSheet.create({
-    peerDot: {
-        width: 14,
-        height: 14,
-        borderRadius: 7,
-        backgroundColor: Colors.orange,
-        borderWidth: 2,
-        borderColor: '#fff',
-        elevation: 2,
-    },
-    userDot: {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: Colors.cyan,
-        borderWidth: 2,
-        borderColor: '#fff',
-        elevation: 2,
-    },
-});
 
 // ---------------------------------------------------------------------------
 // Sidebar drawer
@@ -134,15 +154,69 @@ export default function HomeScreen() {
     const [locationOn, setLocationOn] = useState(false);
     const [btOn, setBtOn] = useState(false);
 
+    // Latest accepted GPS fix — null until first real fix arrives.
+    // accuracy is in metres; used to draw the uncertainty circle.
+    const [userLocation, setUserLocation] = useState<{
+        latitude: number;
+        longitude: number;
+        accuracy: number;
+    } | null>(null);
+    // lastFixRef: last raw fix received — used for the 5 m jitter guard
+    const lastFixRef = useRef<{ latitude: number; longitude: number } | null>(null);
+    // lastRenderedRef: last position that triggered a state update — used for the 10 m snap guard
+    const lastRenderedRef = useRef<{ latitude: number; longitude: number } | null>(null);
+
     const peers = useDeviceStore(state => state.peers);
     const isScanning = useDeviceStore(state => state.isScanning);
     const profile = useUserStore(state => state.profile);
 
-    // Max 10 markers, must have coordinates
-    const renderedPeers = useMemo(
-        () => peers.filter(p => p.latitude != null && p.longitude != null).slice(0, 10),
-        [peers],
-    );
+    // Peers eligible for map rendering:
+    //  • must have coordinates
+    //  • location fix must be < 20 s old (stale fixes stay in memory but aren't shown)
+    //  • cap at 5 markers for GPU/render budget
+    const FRESHNESS_MS = 20_000;
+    const renderedPeers = useMemo(() => {
+        const now = Date.now();
+        return peers
+            .filter(p =>
+                p.latitude != null &&
+                p.longitude != null &&
+                p.lastSeen != null &&
+                now - p.lastSeen < FRESHNESS_MS,
+            )
+            .slice(0, 5);
+    }, [peers]);
+
+    // GeoJSON polygon representing GPS accuracy uncertainty — recomputed only when
+    // userLocation changes (i.e. after a ≥ 10 m snap), not on every map frame.
+    const accuracyCircle = useMemo(() => {
+        if (userLocation == null) return null;
+        return createAccuracyCircle(
+            userLocation.latitude,
+            userLocation.longitude,
+            userLocation.accuracy,
+        );
+    }, [userLocation]);
+
+    // GeoJSON FeatureCollection for MapLibre GPU rendering
+    const peerFeatures = useMemo(() => {
+        return {
+            type: 'FeatureCollection' as const,
+            features: renderedPeers.map(p => ({
+                type: 'Feature' as const,
+                id: p.id,
+                geometry: {
+                    type: 'Point' as const,
+                    coordinates: [p.longitude!, p.latitude!]
+                },
+                properties: {
+                    id: p.id,
+                    name: (p as any).name || `Device`,
+                    severity: (p as any).severity || 'NORMAL'
+                }
+            }))
+        };
+    }, [renderedPeers]);
 
     // Check real device permission state — proxy for "enabled" without native polling
     const refreshDeviceState = useCallback(async () => {
@@ -183,6 +257,42 @@ export default function HomeScreen() {
         navigation.navigate('SOSConfirmation');
     }, [navigation]);
 
+    // Continuous location watcher — called by MapLibreGL.UserLocation on every fix.
+    // Two-tier filtering keeps the map stable:
+    //   < JITTER_M (5 m)  → pure GPS noise, discard entirely
+    //   < SNAP_M  (10 m)  → real but small movement, track position but don't re-render
+    //   ≥ SNAP_M  (10 m)  → accept fix, update state (triggers re-render + camera move)
+    const handleLocationUpdate = useCallback((location: any) => {
+        const lat: number | undefined = location?.coords?.latitude;
+        const lng: number | undefined = location?.coords?.longitude;
+        const accuracy: number = location?.coords?.accuracy ?? DEFAULT_ACC_M;
+        if (lat == null || lng == null) return;
+
+        // ── Jitter guard: compare against last raw fix ──────────────────────
+        const lastFix = lastFixRef.current;
+        if (lastFix != null) {
+            const jitter = haversineMeters(lastFix.latitude, lastFix.longitude, lat, lng);
+            if (jitter < JITTER_M) return; // noise — don't even update the tracking ref
+        }
+        lastFixRef.current = { latitude: lat, longitude: lng };
+
+        // ── Snap guard: compare against last rendered position ───────────────
+        const lastRendered = lastRenderedRef.current;
+        const distFromRender = lastRendered != null
+            ? haversineMeters(lastRendered.latitude, lastRendered.longitude, lat, lng)
+            : Infinity; // first fix always accepted
+
+        if (distFromRender < SNAP_M) return; // moved, but not enough to re-render
+
+        // ── Accept — update rendered state and notify BLE layer ─────────────
+        lastRenderedRef.current = { latitude: lat, longitude: lng };
+        setUserLocation({ latitude: lat, longitude: lng, accuracy });
+
+        if (NativeModules.RahatMesh) {
+            NativeModules.RahatMesh.updateLocation(lat, lng);
+        }
+    }, []);
+
     const handleLogout = useCallback(async () => {
         setSidebarVisible(false);
         await AsyncStorage.removeItem('@rahat_name');
@@ -196,17 +306,19 @@ export default function HomeScreen() {
             {/* Full-screen OSM map — no Google dependencies */}
             <MapLibreGL.MapView
                 style={StyleSheet.absoluteFillObject}
-                styleJSON={JSON.stringify({ version: 8, sources: {}, layers: [] })}
                 logoEnabled={false}
                 attributionEnabled={false}
                 rotateEnabled={false}
                 pitchEnabled={false}
             >
-                <MapLibreGL.Camera
-                    zoomLevel={13}
-                    followUserLocation={true}
-                    animationDuration={0}
-                />
+                {/* Camera only moves when we have a real GPS fix — prevents snapping to (0,0) */}
+                {userLocation != null && (
+                    <MapLibreGL.Camera
+                        zoomLevel={13}
+                        centerCoordinate={[userLocation.longitude, userLocation.latitude]}
+                        animationDuration={300}
+                    />
+                )}
                 
                 {/* OpenStreetMap tile overlay */}
                 <MapLibreGL.RasterSource
@@ -217,22 +329,38 @@ export default function HomeScreen() {
                     <MapLibreGL.RasterLayer id="osm-layer" sourceID="osm-source" />
                 </MapLibreGL.RasterSource>
 
-                {/* Real User Location */}
+                {/* Accuracy circle — semi-transparent cyan ring around user position.
+                    Rendered below the blue dot so the dot stays visible on top.
+                    Radius = reported GPS accuracy (metres), fallback = 30 m. */}
+                {accuracyCircle != null && (
+                    <MapLibreGL.ShapeSource id="accuracy-source" shape={accuracyCircle}>
+                        <MapLibreGL.FillLayer
+                            id="accuracy-fill"
+                            style={ACCURACY_FILL_STYLE}
+                        />
+                    </MapLibreGL.ShapeSource>
+                )}
+
+                {/* User location — blue dot (MapLibre built-in) */}
                 <MapLibreGL.UserLocation
                     visible={true}
                     showsUserHeadingIndicator={true}
+                    onUpdate={handleLocationUpdate}
                 />
 
-                {/* Peers — orange dots, hard cap 10 */}
-                {renderedPeers.map(p => (
-                    <MapLibreGL.PointAnnotation
-                        key={p.id}
-                        id={`peer-${p.id}`}
-                        coordinate={[p.longitude!, p.latitude!]}
-                    >
-                        <PeerMarker />
-                    </MapLibreGL.PointAnnotation>
-                ))}
+                {/* Peer markers — Rendered efficiently via GPU ShapeSource */}
+                {peerFeatures.features.length > 0 && (
+                    <MapLibreGL.ShapeSource id="peers-source" shape={peerFeatures}>
+                        <MapLibreGL.CircleLayer
+                            id="peers-layer-outline"
+                            style={PEER_OUTLINE_STYLE}
+                        />
+                        <MapLibreGL.CircleLayer
+                            id="peers-layer-fill"
+                            style={PEER_FILL_STYLE}
+                        />
+                    </MapLibreGL.ShapeSource>
+                )}
             </MapLibreGL.MapView>
 
             {/* ── Top header overlay ── */}
@@ -285,7 +413,7 @@ export default function HomeScreen() {
                     </Text>
                 </TouchableOpacity>
 
-                {/* RIGHT: Alert Feed + SOS */}
+                {/* RIGHT: Alert Feed + TEST LOC + SOS */}
                 <View style={styles.rightCluster} pointerEvents="box-none">
                     <TouchableOpacity
                         style={styles.alertBtn}
@@ -293,6 +421,15 @@ export default function HomeScreen() {
                         activeOpacity={0.85}
                     >
                         <Text style={styles.alertBtnText}>Alerts</Text>
+                    </TouchableOpacity>
+
+                    {/* TEST ONLY: fires emitTestEvent('LOCATION') through full BLE pipeline */}
+                    <TouchableOpacity
+                        style={styles.testLocBtn}
+                        onPress={() => emitTestEvent('LOCATION')}
+                        activeOpacity={0.85}
+                    >
+                        <Text style={styles.testLocBtnText}>LOC</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.sosBtn} onPress={handleSOS} activeOpacity={0.8}>
@@ -407,6 +544,15 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     alertBtnText: { color: Colors.orange, fontSize: 14, fontWeight: '700' },
+    testLocBtn: {
+        backgroundColor: 'rgba(4,11,22,0.88)',
+        borderWidth: 1,
+        borderColor: Colors.cyan,
+        borderRadius: 22,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+    },
+    testLocBtnText: { color: Colors.cyan, fontSize: 14, fontWeight: '700' },
     sosBtn: {
         width: 68,
         height: 68,

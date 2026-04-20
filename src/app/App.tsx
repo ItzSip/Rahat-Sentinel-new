@@ -6,9 +6,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import RootNavigator from './navigation/RootNavigator';
 import AuthScreen from '../screens/AuthScreen';
+import { initLocationBridge } from '../core/locationBridge';
+import { setTransportStrategy } from '../core/syncLayer';
+import { getDeviceId } from '../core/deviceIdentity';
 
 // Disable token requirement — OSM needs no token
 MapLibreGL.setAccessToken(null);
+
+// Wire location bridge once — before any component renders.
+// Validated LOCATION events from the event engine flow into deviceStore here.
+initLocationBridge();
 
 LogBox.ignoreLogs([
     'The result of getSnapshot should be cached',
@@ -49,16 +56,28 @@ const App = () => {
 
     useEffect(() => {
         const bootstrap = async () => {
+            // 1. Resolve persistent device identity before any events are emitted
+            await getDeviceId();
+
+            // 2. Check onboarding state
             try {
                 const flag = await AsyncStorage.getItem('has_onboarded');
                 setHasOnboarded(flag === 'true');
             } catch {
                 setHasOnboarded(false);
             }
-            // Request permissions then start BLE mesh + location
+
+            // 3. Request permissions, then start location + BLE
             await requestPermissions();
             MapLibreGL.locationManager.start();
-            const { startScanning } = await import('../features/bluetoothMesh/bluetoothService');
+
+            // 4. Wire transport strategy: outbound events → BLE send.
+            //    Must run once, before startScanning, so the channel is ready.
+            const { startScanning, bleSend } = await import('../features/bluetoothMesh/bluetoothService');
+            setTransportStrategy((frame: string) => {
+                bleSend(frame);
+            });
+
             startScanning();
         };
 

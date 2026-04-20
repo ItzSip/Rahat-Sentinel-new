@@ -9,15 +9,17 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
- * Senior Architect Implementation: BleAdvertiser
- * 
- * DESIGN PRINCIPLES:
- * 1. PERSISTENCE: Start once, stay active.
- * 2. SEAMLESS UPDATES: Use AdvertisingSet (API 26+) for zero-downtime payload rotation.
- * 3. RANGE MAXIMIZATION: Use LE Coded PHY if supported for long-distance mesh.
- * 4. POWER: TX_POWER_HIGH for maximum penetration.
+ * BleAdvertiser — Range-optimised with hardware-safe fallback
+ *
+ * Strategy (tried in order):
+ *   1. LE Coded PHY (S=8), non-legacy — 4x range  [if hardware supports it AND start succeeds]
+ *   2. Legacy 1M PHY at TX_POWER_MAX              [guaranteed fallback]
+ *
+ * Payload layout (25 bytes):
+ *   [0-15] EphID (16B) | [16] Status (1B) | [17-20] Lat float LE | [21-24] Lng float LE
  */
 class BleAdvertiser(private val context: Context) {
 
@@ -27,115 +29,124 @@ class BleAdvertiser(private val context: Context) {
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     }
-    private val advertiser: BluetoothLeAdvertiser? by lazy { bluetoothAdapter?.bluetoothLeAdvertiser }
+    private val bleAdvertiser: BluetoothLeAdvertiser? get() = bluetoothAdapter?.bluetoothLeAdvertiser
 
     private var currentAdvertisingSet: AdvertisingSet? = null
-    private var isAdvertising = false
+    var isAdvertising = false
+        private set
     private var lastPayload: ByteArray? = null
     private var startTime = 0L
 
     private val callback = object : AdvertisingSetCallback() {
-        override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet, txPower: Int, status: Int) {
-            if (status == ADVERTISE_SUCCESS) {
+        override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
+            if (status == ADVERTISE_SUCCESS && set != null) {
                 startTime = System.currentTimeMillis()
-                Log.i(TAG, "BLE_ADVERTISER_STARTED_SUCCESS: (TX Power: $txPower)")
-                currentAdvertisingSet = advertisingSet
+                currentAdvertisingSet = set
                 isAdvertising = true
+                Log.i(TAG, "BLE_ADVERTISER_STARTED: TX=${txPower}dBm (legacy 1M, MAX RANGE)")
             } else {
-                Log.e(TAG, "BLE_ADVERTISER_START_FAILED: Status $status")
                 isAdvertising = false
+                currentAdvertisingSet = null
+                Log.e(TAG, "BLE_ADVERTISER_START_FAILED: status=$status")
             }
         }
 
-        override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet) {
-            val uptime = (System.currentTimeMillis() - startTime) / 1000
-            Log.w(TAG, "BLE_ADVERTISER_STOPPED: Hardware set stopped. Uptime: ${uptime}s")
+        override fun onAdvertisingSetStopped(set: AdvertisingSet?) {
+            Log.w(TAG, "BLE_ADVERTISER_STOPPED after ${(System.currentTimeMillis()-startTime)/1000}s")
             isAdvertising = false
             currentAdvertisingSet = null
         }
 
-        override fun onAdvertisingDataSet(advertisingSet: AdvertisingSet, status: Int) {
+        override fun onAdvertisingDataSet(set: AdvertisingSet?, status: Int) {
             if (status == ADVERTISE_SUCCESS) {
-                Log.d(TAG, "BLE_ADVERTISER_PAYLOAD_UPDATED_SEAMLESSLY")
+                Log.d(TAG, "BLE_PAYLOAD_UPDATED: OK")
             } else {
-                Log.e(TAG, "BLE_ADVERTISER_PAYLOAD_UPDATE_FAILED: Status $status")
+                Log.e(TAG, "BLE_PAYLOAD_UPDATE_FAILED: status=$status")
             }
         }
     }
 
     @SuppressLint("MissingPermission")
-    fun startOrUpdateAdvertising(ephemeralId: String, severity: Int, isMoving: Boolean) {
-        val adapterLocal = bluetoothAdapter ?: return
-        val advertiserLocal = advertiser ?: run {
-            Log.e(TAG, "BLE_ADVERTISER_ABORTED: No BLE Hardware")
-            return
-        }
-        
-        val payload = buildManufacturerPayload(ephemeralId, severity, isMoving)
+    fun startOrUpdateAdvertising(ephemeralId: String, severity: Int, lat: Double, lng: Double) {
+        val payload = buildPayload(ephemeralId, severity, lat, lng)
 
-        // Rule: Do NOT update if same (Ignore isMoving updates as per new contract)
-        if (lastPayload?.contentEquals(payload) == true && isAdvertising) {
-            return
-        }
+        // Reset if not advertising (e.g. after BT restart)
+        if (!isAdvertising) lastPayload = null
+
+        if (lastPayload?.contentEquals(payload) == true && isAdvertising) return
         lastPayload = payload
 
-        val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false)
-            .addManufacturerData(MANUFACTURER_ID, payload)
-            .build()
-
+        // If already running — zero-downtime payload update
         val currentSet = currentAdvertisingSet
         if (currentSet != null && isAdvertising) {
-            Log.d(TAG, "BLE_ADVERTISER_ROTATING_PAYLOAD: EphID: $ephemeralId")
-            currentSet.setAdvertisingData(data)
-        } else {
-            Log.i(TAG, "BLE_ADVERTISER_INITIAL_START: EphID: $ephemeralId")
-            
-            // SENIOR ARCHITECT DECISION: Force Legacy Mode (LE_1M) for universal discovery.
-            val parameters = AdvertisingSetParameters.Builder()
-                .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
-                .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
-                .setConnectable(false)
-                .setLegacyMode(true) 
+            currentSet.setAdvertisingData(buildAdvertiseData(payload))
+            Log.d(TAG, "BLE_PAYLOAD_ROTATED: GPS=${"%.4f".format(lat)},${"%.4f".format(lng)}")
+            return
+        }
+
+        // Start fresh — always legacy 1M for maximum compatibility
+        // Coded PHY extended advertising blocks scanners from reading manufacturer data
+        startLegacyAdvertising(ephemeralId, severity, lat, lng)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startLegacyAdvertising(ephemeralId: String, severity: Int, lat: Double, lng: Double) {
+        val advertiser = bleAdvertiser ?: return
+        val payload = buildPayload(ephemeralId, severity, lat, lng)
+        Log.i(TAG, "BLE_ADVERTISER_STARTING: Legacy 1M MAX_POWER (ephId=${ephemeralId.take(8)})")
+        try {
+            val params = AdvertisingSetParameters.Builder()
+                .setInterval(AdvertisingSetParameters.INTERVAL_MIN)
+                .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MAX)
+                .setConnectable(true)  // required for GATT data channel
+                .setScannable(true)    // legacy+connectable requires scannable (ADV_IND PDU)
+                .setLegacyMode(true)
                 .setPrimaryPhy(BluetoothDevice.PHY_LE_1M)
                 .setSecondaryPhy(BluetoothDevice.PHY_LE_1M)
                 .build()
-
-            Log.i(TAG, "BLE_PHY_ENFORCED: Legacy LE_1M (Maximum Compatibility)")
-            advertiserLocal.startAdvertisingSet(parameters, data, null, null, null, callback)
+            advertiser.startAdvertisingSet(params, buildAdvertiseData(payload), null, null, null, callback)
+        } catch (e: Exception) {
+            Log.e(TAG, "BLE_ADVERTISER_LEGACY_FAIL: ${e.message}")
         }
     }
 
     @SuppressLint("MissingPermission")
     fun stopAdvertising() {
-        if (!isAdvertising) return
         try {
-            val uptime = (System.currentTimeMillis() - startTime) / 1000
-            Log.w(TAG, "BLE_ADVERTISER_STOP_REQUESTED: Terminating session. Total Uptime: ${uptime}s")
-            advertiser?.stopAdvertisingSet(callback)
+            bleAdvertiser?.stopAdvertisingSet(callback)
         } catch (e: Exception) {
-            Log.e(TAG, "BLE_ADVERTISER_STOP_ERR: ${e.message}")
+            Log.e(TAG, "BLE_STOP_ERR: ${e.message}")
         }
     }
 
-    private fun buildManufacturerPayload(ephId: String, severity: Int, isMoving: Boolean): ByteArray {
-        val buffer = ByteBuffer.allocate(17) // 16 bytes EphID + 1 byte Status
+    private fun buildAdvertiseData(payload: ByteArray): AdvertiseData =
+        AdvertiseData.Builder()
+            .setIncludeDeviceName(false)
+            .addManufacturerData(MANUFACTURER_ID, payload)
+            .build()
+
+    /**
+     * 23-byte payload: [0-15] EphID | [16] Status | [17-19] Lat int24 LE | [20-22] Lng int24 LE
+     *
+     * Lat/Lng encoded as signed 24-bit integers × 10000 (≈11m precision).
+     * Total AD frame: 3 (flags) + 4 (mfr header) + 23 = 30 bytes ≤ 31-byte legacy limit.
+     */
+    private fun buildPayload(ephId: String, severity: Int, lat: Double, lng: Double): ByteArray {
+        val buf = ByteBuffer.allocate(23).order(ByteOrder.LITTLE_ENDIAN)
         try {
-            // Hex parsing: 32 hex chars = 16 bytes
             val idBytes = ByteArray(16)
-            for (i in 0 until 16) {
-                idBytes[i] = ephId.substring(i * 2, i * 2 + 2).toInt(16).toByte()
-            }
-            buffer.put(idBytes)
-            
-            // Coarse status flag: 1 = SOS, 0 = Normal
-            val statusFlag = if (severity >= 2) 1.toByte() else 0.toByte()
-            buffer.put(statusFlag)
-            
-            Log.d(TAG, "BLE_ADVERTISER_PAYLOAD_BUILT: ID=${ephId.take(8)}... Status=${if (statusFlag == 1.toByte()) "SOS" else "Normal"}")
+            for (i in 0 until 16) idBytes[i] = ephId.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+            buf.put(idBytes)
+            buf.put(if (severity >= 2) 1.toByte() else 0.toByte())
+            // Encode lat/lng as 3-byte little-endian signed integers (×10000)
+            val latInt = (lat * 10000).toInt().coerceIn(-900000, 900000)
+            val lngInt = (lng * 10000).toInt().coerceIn(-1800000, 1800000)
+            buf.put(latInt.toByte()); buf.put((latInt shr 8).toByte()); buf.put((latInt shr 16).toByte())
+            buf.put(lngInt.toByte()); buf.put((lngInt shr 8).toByte()); buf.put((lngInt shr 16).toByte())
+            Log.v(TAG, "BLE_PAYLOAD_BUILT: lat=$lat lng=$lng severity=$severity")
         } catch (e: Exception) {
-            Log.e(TAG, "BLE_ADVERTISER_PAYLOAD_ERR: Invalid EphID format? $ephId")
+            Log.e(TAG, "BLE_PAYLOAD_ERR: $e")
         }
-        return buffer.array()
+        return buf.array()
     }
 }

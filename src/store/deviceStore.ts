@@ -5,6 +5,8 @@ export interface PeerDevice {
     lastSeen: number;
     latitude?: number;
     longitude?: number;
+    accuracy?: number;          // metres reported by originating device
+    locationTimestamp?: number; // epoch ms of the last accepted location fix
 }
 
 interface DeviceState {
