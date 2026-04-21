@@ -1,0 +1,15 @@
+# Web & API
+fastapi
+uvicorn
+requests
+python-dotenv
+
+# Data Science
+pandas
+numpy
+scikit-learn
+xgboost
+
+# Geospatial
+geopandas
+earthengine-api
