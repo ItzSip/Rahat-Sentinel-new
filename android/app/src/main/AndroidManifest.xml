@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
@@ -28,6 +29,24 @@
       android:supportsRtl="true">
         
 
+
+        <!-- Shake detection foreground service — runs while disaster is active -->
+        <service
+            android:name=".shake.ShakeDetectorService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Handles YES / NO taps on the disaster notification -->
+        <receiver
+            android:name=".shake.NotificationActionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.rahat.ACTION_YES" />
+                <action android:name="com.rahat.ACTION_NO" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".service.EmergencyForegroundService"

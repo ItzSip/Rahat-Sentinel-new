@@ -24,7 +24,7 @@ export type RootStackParamList = {
     EarlyWarning: undefined;
     NearbyDevices: undefined;
     SafeZoneGuide: undefined;
-    SOSConfirmation: undefined;
+    SOSConfirmation: { message: string; lat: number; lng: number };
     Profile: undefined;
     Settings: undefined;
 };

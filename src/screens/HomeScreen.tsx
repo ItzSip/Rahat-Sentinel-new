@@ -21,6 +21,9 @@ import { GlassCard } from '../components/ui/GlassCard';
 import { useDeviceStore } from '../store/deviceStore';
 import { useUserStore } from '../store/userStore';
 import { emitTestEvent } from '../core/eventEngine';
+import { useDisasterStore } from '../store/disasterStore';
+import { useDisasterEffect } from '../hooks/useDisasterEffect';
+import { useSeverity } from '../hooks/useSeverity';
 
 // ---------------------------------------------------------------------------
 // Geo helpers
@@ -58,6 +61,11 @@ function createAccuracyCircle(lat: number, lng: number, radiusM: number) {
 const JITTER_M         =  5;  // < 5 m  → pure GPS noise, ignore completely
 const SNAP_M           = 10;  // ≥ 10 m from last render → accept, re-render
 const DEFAULT_ACC_M    = 30;  // fallback accuracy radius when device doesn't report it
+
+// Severity colour maps — keyed by SeverityLevel string
+const SEV_COLOR  = { GREEN: Colors.green,                  ORANGE: Colors.orange,                  RED: Colors.red                  } as const;
+const SEV_BG     = { GREEN: 'rgba(52,199,89,0.15)',        ORANGE: 'rgba(255,159,10,0.15)',        RED: 'rgba(255,59,59,0.15)'        } as const;
+const SEV_BORDER = { GREEN: 'rgba(52,199,89,0.45)',        ORANGE: 'rgba(255,159,10,0.45)',        RED: 'rgba(255,59,59,0.45)'        } as const;
 
 // MapLibre paint objects extracted to module-level to satisfy react-native/no-inline-styles
 const ACCURACY_FILL_STYLE   = { fillColor: 'rgba(50,173,230,0.12)', fillOutlineColor: Colors.cyan };
@@ -170,6 +178,10 @@ export default function HomeScreen() {
     const isScanning = useDeviceStore(state => state.isScanning);
     const profile = useUserStore(state => state.profile);
 
+    const isDisasterActive = useDisasterStore(s => s.isDisasterActive);
+    const severity = useSeverity();
+    useDisasterEffect();
+
     // Peers eligible for map rendering:
     //  • must have coordinates
     //  • location fix must be < 20 s old (stale fixes stay in memory but aren't shown)
@@ -252,10 +264,31 @@ export default function HomeScreen() {
         if (isScanning) setBtOn(true);
     }, [isScanning]);
 
+    // Keep a ref so the 30-min interval always reads the latest fix without stale closure
+    const userLocationRef = useRef(userLocation);
+    useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
+
+    // Periodic location beacon — fires every 30 min while app is open
+    useEffect(() => {
+        const id = setInterval(() => {
+            const loc = userLocationRef.current;
+            if (!loc) return;
+            const msg = `LAT:${loc.latitude.toFixed(4)},LNG:${loc.longitude.toFixed(4)}`;
+            fetch(`http://192.168.4.1/send?data=${encodeURIComponent(msg)}`).catch(() => {});
+        }, 30 * 60 * 1000);
+        return () => clearInterval(id);
+    }, []);
+
     const handleSOS = useCallback(() => {
         emitTestEvent('SOS');
-        navigation.navigate('SOSConfirmation');
-    }, [navigation]);
+        const lat = userLocation?.latitude ?? 0;
+        const lng = userLocation?.longitude ?? 0;
+        const message = userLocation
+            ? `LAT:${lat.toFixed(4)},LNG:${lng.toFixed(4)}`
+            : 'NO_FIX';
+        fetch(`http://192.168.4.1/send?data=${encodeURIComponent(message)}`).catch(() => {});
+        navigation.navigate('SOSConfirmation', { message, lat, lng });
+    }, [navigation, userLocation]);
 
     // Continuous location watcher — called by MapLibreGL.UserLocation on every fix.
     // Two-tier filtering keeps the map stable:
@@ -348,8 +381,8 @@ export default function HomeScreen() {
                     onUpdate={handleLocationUpdate}
                 />
 
-                {/* Peer markers — Rendered efficiently via GPU ShapeSource */}
-                {peerFeatures.features.length > 0 && (
+                {/* Peer markers — only visible when disaster mode is active */}
+                {isDisasterActive && peerFeatures.features.length > 0 && (
                     <MapLibreGL.ShapeSource id="peers-source" shape={peerFeatures}>
                         <MapLibreGL.CircleLayer
                             id="peers-layer-outline"
@@ -374,6 +407,19 @@ export default function HomeScreen() {
                 </View>
 
                 <View style={styles.rightIcons} pointerEvents="none">
+                    {/* Severity badge — only visible when disaster is active */}
+                    {isDisasterActive && (
+                        <View style={[
+                            styles.severityBadge,
+                            { borderColor: SEV_BORDER[severity], backgroundColor: SEV_BG[severity] },
+                        ]}>
+                            <View style={[styles.severityDot, { backgroundColor: SEV_COLOR[severity] }]} />
+                            <Text style={[styles.severityText, { color: SEV_COLOR[severity] }]}>
+                                {severity}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Location status — display only, no touch */}
                     <View style={[styles.statusIcon, locationOn && styles.statusIconOn]}>
                         <Text style={styles.statusEmoji}>📍</Text>
@@ -413,7 +459,7 @@ export default function HomeScreen() {
                     </Text>
                 </TouchableOpacity>
 
-                {/* RIGHT: Alert Feed + TEST LOC + SOS */}
+                {/* RIGHT: Alert Feed + SOS */}
                 <View style={styles.rightCluster} pointerEvents="box-none">
                     <TouchableOpacity
                         style={styles.alertBtn}
@@ -421,15 +467,6 @@ export default function HomeScreen() {
                         activeOpacity={0.85}
                     >
                         <Text style={styles.alertBtnText}>Alerts</Text>
-                    </TouchableOpacity>
-
-                    {/* TEST ONLY: fires emitTestEvent('LOCATION') through full BLE pipeline */}
-                    <TouchableOpacity
-                        style={styles.testLocBtn}
-                        onPress={() => emitTestEvent('LOCATION')}
-                        activeOpacity={0.85}
-                    >
-                        <Text style={styles.testLocBtnText}>LOC</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.sosBtn} onPress={handleSOS} activeOpacity={0.8}>
@@ -544,15 +581,6 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     alertBtnText: { color: Colors.orange, fontSize: 14, fontWeight: '700' },
-    testLocBtn: {
-        backgroundColor: 'rgba(4,11,22,0.88)',
-        borderWidth: 1,
-        borderColor: Colors.cyan,
-        borderRadius: 22,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-    },
-    testLocBtnText: { color: Colors.cyan, fontSize: 14, fontWeight: '700' },
     sosBtn: {
         width: 68,
         height: 68,
@@ -567,6 +595,19 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 0 },
     },
     sosBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+
+    // Severity badge in header
+    severityBadge: {
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        gap: 5,
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    severityDot: { width: 7, height: 7, borderRadius: 4 },
+    severityText: { fontSize: 11, fontWeight: '700' as const, letterSpacing: 0.6 },
 
     // Sidebar
     sidebarOverlay: {

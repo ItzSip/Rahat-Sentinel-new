@@ -5,8 +5,13 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useDeviceStore, PeerDevice } from '../store/deviceStore';
+import { useDisasterStore } from '../store/disasterStore';
+import { useSeverity } from '../hooks/useSeverity';
 import { Colors } from '../theme/colors';
 import { GlassCard } from '../components/ui/GlassCard';
+
+const SEV_COLOR = { GREEN: Colors.green, ORANGE: Colors.orange, RED: Colors.red } as const;
+const SEV_BG    = { GREEN: 'rgba(52,199,89,0.12)', ORANGE: 'rgba(255,159,10,0.12)', RED: 'rgba(255,59,59,0.12)' } as const;
 
 // Map signal level strings to colors
 const signalColor = (level?: string) => {
@@ -27,10 +32,11 @@ const trendIcon = (trend?: string) => {
     }
 };
 
-const PeerRow = memo(({ peer }: { peer: PeerDevice & { name?: string; severity?: string; signalLevel?: string; signalTrend?: string } }) => {
+const PeerRow = memo(({ peer, showLocation }: { peer: PeerDevice & { name?: string; severity?: string; signalLevel?: string; signalTrend?: string }; showLocation: boolean }) => {
     const level = peer.signalLevel;
     const trend = peer.signalTrend;
     const age   = Math.round((Date.now() - peer.lastSeen) / 1000);
+    const hasLoc = peer.latitude != null && peer.longitude != null;
 
     return (
         <GlassCard style={styles.card}>
@@ -53,17 +59,30 @@ const PeerRow = memo(({ peer }: { peer: PeerDevice & { name?: string; severity?:
                     </Text>
                 </Text>
                 <Text style={styles.meta}>Last seen: {age}s ago</Text>
+                {showLocation && hasLoc && (
+                    <Text style={styles.meta}>
+                        Location:{' '}
+                        <Text style={{ color: Colors.cyan }}>
+                            {peer.latitude!.toFixed(5)}, {peer.longitude!.toFixed(5)}
+                        </Text>
+                    </Text>
+                )}
+                {showLocation && !hasLoc && (
+                    <Text style={styles.meta}>Location: <Text style={{ color: Colors.inactive }}>no fix yet</Text></Text>
+                )}
             </View>
         </GlassCard>
     );
 });
 
 export default function NearbyDevicesScreen() {
-    const navigation = useNavigation();
-    const peers      = useDeviceStore(s => s.peers);
-    const isScanning = useDeviceStore(s => s.isScanning);
+    const navigation       = useNavigation();
+    const peers            = useDeviceStore(s => s.peers);
+    const isScanning       = useDeviceStore(s => s.isScanning);
+    const isDisasterActive = useDisasterStore(s => s.isDisasterActive);
+    const severity         = useSeverity();
 
-    const renderItem = useCallback(({ item }: { item: PeerDevice }) => <PeerRow peer={item as any} />, []);
+    const renderItem = useCallback(({ item }: { item: PeerDevice }) => <PeerRow peer={item as any} showLocation={isDisasterActive} />, [isDisasterActive]);
     const keyExtractor = useCallback((item: PeerDevice) => item.id, []);
 
     return (
@@ -82,6 +101,21 @@ export default function NearbyDevicesScreen() {
                 )}
             </View>
 
+            {/* Own severity banner — only shown when disaster is active */}
+            {isDisasterActive && (
+                <View style={[styles.severityBanner, { backgroundColor: SEV_BG[severity] }]}>
+                    <View style={[styles.severityDot, { backgroundColor: SEV_COLOR[severity] }]} />
+                    <Text style={[styles.severityLabel, { color: SEV_COLOR[severity] }]}>
+                        Your status: {severity}
+                    </Text>
+                    <Text style={styles.severityHint}>
+                        {severity === 'GREEN'  && '— shake phone or say YES to reset timer'}
+                        {severity === 'ORANGE' && '— check in soon to avoid RED status'}
+                        {severity === 'RED'    && '— help has been alerted'}
+                    </Text>
+                </View>
+            )}
+
             {/* Summary bar */}
             <View style={styles.summaryBar}>
                 <Text style={styles.summaryText}>
@@ -99,9 +133,14 @@ export default function NearbyDevicesScreen() {
                     <Text style={styles.emptyTitle}>No Peers Detected</Text>
                     <Text style={styles.emptySubtitle}>
                         {isScanning
-                            ? 'BLE mesh is scanning. Other Rahat devices will appear here.'
-                            : 'BLE mesh is idle. Start will auto-trigger on next app cycle.'}
+                            ? 'BLE mesh is scanning. Other Rahat devices will appear here when in range.'
+                            : 'BLE mesh is idle. Restart the app to begin scanning.'}
                     </Text>
+                    {!isDisasterActive && (
+                        <Text style={[styles.emptySubtitle, { marginTop: 8, color: Colors.inactive }]}>
+                            Activate disaster mode to see device locations on the map.
+                        </Text>
+                    )}
                 </View>
             ) : (
                 <FlatList
@@ -114,6 +153,7 @@ export default function NearbyDevicesScreen() {
                     windowSize={5}
                 />
             )}
+
         </View>
     );
 }
@@ -141,6 +181,14 @@ const styles = StyleSheet.create({
     trend:       { fontSize: 20, fontWeight: 'bold' },
     rowMeta:     { gap: 3 },
     meta:        { color: Colors.textSecondary, fontSize: 13 },
+    severityBanner: {
+        flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+        paddingHorizontal: 16, paddingVertical: 10,
+        borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    },
+    severityDot:  { width: 9, height: 9, borderRadius: 5 },
+    severityLabel:{ fontSize: 13, fontWeight: '700' },
+    severityHint: { color: Colors.textSecondary, fontSize: 12, flex: 1 },
     empty:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
     emptyIcon:   { fontSize: 56, marginBottom: 16 },
     emptyTitle:  { color: Colors.textPrimary, fontSize: 20, fontWeight: 'bold', marginBottom: 8 },

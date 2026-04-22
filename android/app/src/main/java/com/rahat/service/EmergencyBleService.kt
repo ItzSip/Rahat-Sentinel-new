@@ -144,20 +144,15 @@ class EmergencyBleService : Service() {
         orchestrationJob = serviceScope.launch {
             Log.i(TAG, "BLE_MESH_ORCHESTRATOR: Starting — waiting for Bluetooth to be ON")
 
-            // RETRY LOOP: Poll every 2s until BT is ON (max 60s)
-            val deadline = System.currentTimeMillis() + 60_000L
-            while (System.currentTimeMillis() < deadline) {
+            // Poll every 2s indefinitely until BT is ON or job is cancelled.
+            // The bluetoothStateReceiver will also re-trigger this if BT turns on later.
+            while (isActive) {
                 val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
                 if (adapter?.isEnabled == true) break
                 Log.w(TAG, "BLE_MESH_ORCHESTRATOR: Waiting for BT...")
                 delay(2000)
             }
-
-            val adapterCheck = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
-            if (adapterCheck?.isEnabled != true) {
-                Log.e(TAG, "BLE_MESH_ORCHESTRATOR: BT never came ON after 60s. Stopping.")
-                return@launch
-            }
+            if (!isActive) return@launch
 
             val role = BleChannels.role
             Log.i(TAG, "BLE_MESH_ORCHESTRATOR: Role=${role.name}")
