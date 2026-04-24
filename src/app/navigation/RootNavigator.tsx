@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Colors } from '../../theme/colors';
@@ -30,6 +30,11 @@ export type RootStackParamList = {
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// Adapter: gives AuthScreen the onComplete callback it expects
+function AuthScreenAdapter({ navigation }: NativeStackScreenProps<RootStackParamList, 'Auth'>) {
+    return <AuthScreen onComplete={() => navigation.replace('Home')} />;
+}
 
 export default function RootNavigator() {
     const [initialRoute, setInitialRoute] = useState<'Auth' | 'Home' | null>(null);
@@ -69,7 +74,7 @@ export default function RootNavigator() {
                 animation: 'fade',
             }}
         >
-            <Stack.Screen name="Auth" component={AuthScreen} />
+            <Stack.Screen name="Auth" component={AuthScreenAdapter} />
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="AlertFeed" component={AlertFeedScreen} />
             <Stack.Screen name="EarlyWarning" component={EarlyWarningScreen} />
