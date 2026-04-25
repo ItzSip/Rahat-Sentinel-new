@@ -119,6 +119,7 @@ class EmergencyBleService : Service() {
 
             if (newSev >= 0) {
                 currentSeverity = newSev.coerceIn(0, 3)
+                if (currentSeverity == 0) BleChannels.pendingDisasterFrame = null
                 Log.d(TAG, "BLE_SEVERITY_UPDATE: $currentSeverity")
             }
             if (newLat != Double.MIN_VALUE && newLng != Double.MIN_VALUE) {

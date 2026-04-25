@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Text, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAlertStore } from '../store/alertStore';
@@ -8,6 +8,8 @@ import { PillBadge, SeverityType } from '../components/ui/PillBadge';
 import { ActionButton } from '../components/ui/ActionButton';
 import { RahatEvent } from '../core/types';
 import { emitTestEvent } from '../core/eventEngine';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
 const AlertRow = memo(({ item }: { item: RahatEvent }) => {
     // Determine severity from type/priority
@@ -39,7 +41,11 @@ const AlertRow = memo(({ item }: { item: RahatEvent }) => {
 export default function AlertFeedScreen() {
     const navigation = useNavigation();
     const alerts = useAlertStore(state => state.alerts);
-    const displayAlerts = alerts.slice(0, 20); // enforce max 20
+    const displayAlerts = alerts.slice(0, 20);
+    const s = useStrings();
+    const { speak } = useNarrator();
+
+    useEffect(() => { speak(s.screenAlertFeed); }, []);
 
     const renderItem = useCallback(({ item }: { item: RahatEvent }) => <AlertRow item={item} />, []);
     const keyExtractor = useCallback((item: RahatEvent) => item.id, []);
@@ -48,13 +54,13 @@ export default function AlertFeedScreen() {
         <View style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
+                    <Text style={styles.backText}>{s.back}</Text>
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Active Alerts</Text>
+                <Text style={styles.headerTitle}>{s.activeAlerts}</Text>
             </View>
             {displayAlerts.length === 0 ? (
                 <View style={styles.emptyState}>
-                    <Text style={styles.emptyText}>No active alerts nearby.</Text>
+                    <Text style={styles.emptyText}>{s.noAlerts}</Text>
                 </View>
             ) : (
                 <FlatList
@@ -75,7 +81,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: Colors.background, paddingTop: 52 },
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 10 },
     backBtn: { paddingRight: 16, paddingVertical: 4 },
-    backText: { color: Colors.cyan, fontSize: 16 },
+    backText: { color: Colors.primary, fontSize: 16 },
     headerTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: 'bold' },
     listContent: { padding: 20 },
     card: { marginBottom: 15 },

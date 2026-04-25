@@ -45,6 +45,10 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
     @ReactMethod
     fun bleSend(payload: String) {
         Log.d("RahatMeshModule", "[BLE TX] $payload")
+        // Cache DISASTER frames — delivered to peers that connect after initial broadcast
+        if (payload.contains("\"DISASTER\"")) {
+            BleChannels.pendingDisasterFrame = payload
+        }
         BleChannels.send(payload)
     }
 

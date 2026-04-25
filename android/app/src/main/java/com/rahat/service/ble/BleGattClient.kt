@@ -82,6 +82,11 @@ class BleGattClient(private val context: Context) {
             }
             connections[mac] = gatt
             Log.i(TAG, "GATT_READY: $mac (${connections.size} total peers)")
+            // Deliver any pending disaster frame to this newly-connected peer
+            BleChannels.pendingDisasterFrame?.let { frame ->
+                Log.d(TAG, "GATT_READY_DISASTER_REPLAY → $mac")
+                writeFrame(gatt, frame)
+            }
         }
 
         override fun onCharacteristicWrite(

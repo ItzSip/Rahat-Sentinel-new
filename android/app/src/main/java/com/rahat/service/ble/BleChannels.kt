@@ -40,6 +40,12 @@ object BleChannels {
      */
     var onFrameReceived: ((String) -> Unit)? = null
 
+    /**
+     * Holds the most recent DISASTER frame so that peers connecting AFTER
+     * the initial broadcast still receive it.  Cleared when disaster is off.
+     */
+    @Volatile var pendingDisasterFrame: String? = null
+
     /** Route an outbound frame to the GATT client layer. */
     fun send(frame: String) {
         val fn = sender

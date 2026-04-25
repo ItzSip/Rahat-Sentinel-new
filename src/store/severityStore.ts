@@ -7,12 +7,17 @@ export type SeverityLevel = 'GREEN' | 'ORANGE' | 'RED';
 
 // ── Pure helpers (no React, no side effects) ─────────────────────────────────
 
+// In DEV builds use 10 s → ORANGE, 20 s → RED so you can verify transitions without waiting.
+// In production release builds __DEV__ is false so boundaries are 10 min / 15 min.
+const GREEN_MS = __DEV__ ? 10_000  : 10 * 60_000;
+const RED_MS   = __DEV__ ? 20_000  : 15 * 60_000;
+
 export function computeSeverity(timerStart: number, overrideRed: boolean): SeverityLevel {
     if (overrideRed) return 'RED';
     if (timerStart === 0) return 'GREEN';
-    const elapsedMin = (Date.now() - timerStart) / 60_000;
-    if (elapsedMin < 10) return 'GREEN';
-    if (elapsedMin < 15) return 'ORANGE';
+    const elapsed = Date.now() - timerStart;
+    if (elapsed < GREEN_MS) return 'GREEN';
+    if (elapsed < RED_MS)   return 'ORANGE';
     return 'RED';
 }
 
@@ -23,10 +28,8 @@ export function computeSeverity(timerStart: number, overrideRed: boolean): Sever
 export function msUntilNextBoundary(timerStart: number): number | null {
     if (timerStart === 0) return null;
     const elapsed = Date.now() - timerStart;
-    const min10   = 10 * 60_000;
-    const min15   = 15 * 60_000;
-    if (elapsed < min10) return min10 - elapsed;
-    if (elapsed < min15) return min15 - elapsed;
+    if (elapsed < GREEN_MS) return GREEN_MS - elapsed;
+    if (elapsed < RED_MS)   return RED_MS   - elapsed;
     return null; // Already RED
 }
 

@@ -11,9 +11,9 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../theme/colors';
 import { useUserStore } from '../store/userStore';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
-// Standalone screen — rendered by App.tsx before NavigationContainer mounts.
-// No navigation hooks; completion is signalled via the onComplete callback.
 interface AuthScreenProps {
     onComplete: () => void;
 }
@@ -22,6 +22,12 @@ export default function AuthScreen({ onComplete }: AuthScreenProps) {
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const setProfile = useUserStore(state => state.setProfile);
+    const s = useStrings();
+    const { speak } = useNarrator();
+
+    React.useEffect(() => {
+        speak(`Rahat Sentinel. ${s.tagline}`);
+    }, []);
 
     const handleContinue = async () => {
         if (!name.trim()) return;
@@ -31,7 +37,6 @@ export default function AuthScreen({ onComplete }: AuthScreenProps) {
             await AsyncStorage.setItem('user_name', name.trim());
             await AsyncStorage.setItem('user_phone', phone.trim());
 
-            // RootNavigator-compatible keys (so navigator always boots to Home)
             await AsyncStorage.setItem('@rahat_launched', 'true');
             await AsyncStorage.setItem('@rahat_name', name.trim());
             await AsyncStorage.setItem('@rahat_phone', phone.trim());
@@ -41,7 +46,6 @@ export default function AuthScreen({ onComplete }: AuthScreenProps) {
             console.log('Storage error:', e);
         }
 
-        // CRITICAL: always runs — onComplete must NOT depend on storage succeeding
         onComplete();
     };
 
@@ -53,15 +57,15 @@ export default function AuthScreen({ onComplete }: AuthScreenProps) {
             <View style={styles.inner}>
                 <View style={styles.logoArea}>
                     <Text style={styles.logo}>⛑</Text>
-                    <Text style={styles.appName}>Rahat Sentinel</Text>
-                    <Text style={styles.subtitle}>Offline-first disaster response</Text>
+                    <Text style={styles.appName}>{s.appName} Sentinel</Text>
+                    <Text style={styles.subtitle}>{s.tagline}</Text>
                 </View>
 
                 <View style={styles.form}>
-                    <Text style={styles.label}>Your name *</Text>
+                    <Text style={styles.label}>{s.yourName}</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Enter your name"
+                        placeholder={s.namePlaceholder}
                         placeholderTextColor={Colors.textSecondary}
                         value={name}
                         onChangeText={setName}
@@ -69,10 +73,10 @@ export default function AuthScreen({ onComplete }: AuthScreenProps) {
                         returnKeyType="next"
                     />
 
-                    <Text style={styles.label}>Phone number (optional)</Text>
+                    <Text style={styles.label}>{s.phoneLabel}</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="+91 XXXXXXXXXX"
+                        placeholder={s.phonePlaceholder}
                         placeholderTextColor={Colors.textSecondary}
                         keyboardType="phone-pad"
                         value={phone}
@@ -87,10 +91,10 @@ export default function AuthScreen({ onComplete }: AuthScreenProps) {
                         activeOpacity={0.85}
                         disabled={!name.trim()}
                     >
-                        <Text style={styles.btnText}>Continue →</Text>
+                        <Text style={styles.btnText}>{s.continueBtn}</Text>
                     </TouchableOpacity>
 
-                    <Text style={styles.note}>Stored locally on your device. No account needed.</Text>
+                    <Text style={styles.note}>{s.storageNote}</Text>
                 </View>
             </View>
         </KeyboardAvoidingView>
@@ -116,7 +120,7 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     btn: {
-        backgroundColor: Colors.cyan,
+        backgroundColor: Colors.primary,
         borderRadius: 10,
         paddingVertical: 16,
         alignItems: 'center',

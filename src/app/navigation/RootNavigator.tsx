@@ -61,7 +61,7 @@ export default function RootNavigator() {
     if (!initialRoute) {
         return (
             <View style={{ flex: 1, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center' }}>
-                <ActivityIndicator color={Colors.cyan} size="large" />
+                <ActivityIndicator color={Colors.primary} size="large" />
             </View>
         );
     }

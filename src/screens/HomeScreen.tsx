@@ -4,6 +4,8 @@ import {
     StyleSheet,
     TouchableOpacity,
     Text,
+    Image,
+    Pressable,
     Dimensions,
     PermissionsAndroid,
     Platform,
@@ -25,6 +27,8 @@ import { emitTestEvent } from '../core/eventEngine';
 import { useDisasterStore } from '../store/disasterStore';
 import { useDisasterEffect } from '../hooks/useDisasterEffect';
 import { useSeverity } from '../hooks/useSeverity';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
 // ---------------------------------------------------------------------------
 // Geo helpers
@@ -150,6 +154,7 @@ interface SidebarProps {
 
 const Sidebar = memo(({ visible, onClose, nav, profile, onLogout }: SidebarProps) => {
     if (!visible) return null;
+    const s = useStrings();
 
     const go = (screen: keyof RootStackParamList) => {
         onClose();
@@ -157,11 +162,11 @@ const Sidebar = memo(({ visible, onClose, nav, profile, onLogout }: SidebarProps
     };
 
     const NAV_ITEMS: [string, keyof RootStackParamList][] = [
-        ['Alert Feed', 'AlertFeed'],
-        ['Early Warning', 'EarlyWarning'],
-        ['Nearby Devices', 'NearbyDevices'],
-        ['Safe Zones', 'SafeZoneGuide'],
-        ['Settings', 'Settings'],
+        [s.alertFeed, 'AlertFeed'],
+        [s.earlyWarning, 'EarlyWarning'],
+        [s.nearbyDevices, 'NearbyDevices'],
+        [s.safeZones, 'SafeZoneGuide'],
+        [s.settings, 'Settings'],
     ];
 
     return (
@@ -181,7 +186,7 @@ const Sidebar = memo(({ visible, onClose, nav, profile, onLogout }: SidebarProps
                         </Text>
                         <View style={styles.activeBadge}>
                             <View style={styles.activePulse} />
-                            <Text style={styles.activeLabel}>Active Mode</Text>
+                            <Text style={styles.activeLabel}>{s.activeMode}</Text>
                         </View>
                     </GlassCard>
                 </TouchableOpacity>
@@ -203,7 +208,7 @@ const Sidebar = memo(({ visible, onClose, nav, profile, onLogout }: SidebarProps
 
                 {/* Logout */}
                 <TouchableOpacity style={styles.logoutBtn} onPress={onLogout} activeOpacity={0.75}>
-                    <Text style={styles.logoutText}>Logout</Text>
+                    <Text style={styles.logoutText}>{s.logout}</Text>
                 </TouchableOpacity>
             </View>
         </View>
@@ -238,7 +243,12 @@ export default function HomeScreen() {
 
     const isDisasterActive = useDisasterStore(s => s.isDisasterActive);
     const severity = useSeverity();
-    useDisasterEffect();
+    useDisasterEffect(severity);
+    const str = useStrings();
+    const { speak } = useNarrator();
+
+    // Announce screen on mount if narrator is on
+    useEffect(() => { speak(str.screenHome); }, []);
 
     // Peers eligible for map rendering:
     //  • must have coordinates
@@ -567,8 +577,8 @@ export default function HomeScreen() {
                     ]} />
                     <Text style={styles.nearbyPillText}>
                         {peers.length > 0
-                            ? `Nearby · ${peers.length}`
-                            : isScanning ? 'Scanning...' : 'Nearby Help'}
+                            ? str.nearbyCount(peers.length)
+                            : isScanning ? str.scanning : str.nearbyHelp}
                     </Text>
                 </TouchableOpacity>
 
@@ -579,12 +589,19 @@ export default function HomeScreen() {
                         onPress={() => navigation.navigate('AlertFeed')}
                         activeOpacity={0.85}
                     >
-                        <Text style={styles.alertBtnText}>Alerts</Text>
+                        <Text style={styles.alertBtnText}>{str.alerts}</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.sosBtn} onPress={handleSOS} activeOpacity={0.8}>
-                        <Text style={styles.sosBtnText}>SOS</Text>
-                    </TouchableOpacity>
+                    <Pressable
+                        onPress={handleSOS}
+                        style={({ pressed }) => [styles.sosBtn, pressed && styles.sosBtnPressed]}
+                    >
+                        <Image
+                            source={require('../assets/sos_snitch.png')}
+                            style={styles.sosBtnImage}
+                            resizeMode="contain"
+                        />
+                    </Pressable>
                 </View>
             </View>
 
@@ -618,7 +635,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: 'rgba(4,11,22,0.72)',
+        backgroundColor: 'rgba(11,11,15,0.82)',
         zIndex: 10,
     },
     headerBtn: {
@@ -677,7 +694,7 @@ const styles = StyleSheet.create({
     nearbyPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(4,11,22,0.88)',
+        backgroundColor: 'rgba(11,11,15,0.92)',
         borderWidth: 1,
         borderColor: Colors.glassBorder,
         borderRadius: 24,
@@ -690,7 +707,7 @@ const styles = StyleSheet.create({
     nearbyPillText: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
     rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     alertBtn: {
-        backgroundColor: 'rgba(4,11,22,0.88)',
+        backgroundColor: 'rgba(11,11,15,0.92)',
         borderWidth: 1,
         borderColor: Colors.orange,
         borderRadius: 22,
@@ -699,19 +716,18 @@ const styles = StyleSheet.create({
     },
     alertBtnText: { color: Colors.orange, fontSize: 14, fontWeight: '700' },
     sosBtn: {
-        width: 68,
-        height: 68,
-        borderRadius: 34,
-        backgroundColor: Colors.red,
+        width: 140,
+        height: 140,
         alignItems: 'center',
         justifyContent: 'center',
-        elevation: 8,
-        shadowColor: Colors.red,
-        shadowOpacity: 0.6,
-        shadowRadius: 12,
-        shadowOffset: { width: 0, height: 0 },
     },
-    sosBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+    sosBtnPressed: {
+        opacity: 0.75,
+    },
+    sosBtnImage: {
+        width: 140,
+        height: 140,
+    },
 
     // Severity badge in header
     severityBadge: {
@@ -757,7 +773,7 @@ const styles = StyleSheet.create({
         width: 52,
         height: 52,
         borderRadius: 26,
-        backgroundColor: Colors.cyan,
+        backgroundColor: Colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 10,

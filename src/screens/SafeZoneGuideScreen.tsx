@@ -1,9 +1,11 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Text, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../theme/colors';
 import { GlassCard } from '../components/ui/GlassCard';
 import { PillBadge } from '../components/ui/PillBadge';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
 interface SafeZone {
     id: string;
@@ -34,13 +36,18 @@ const ZoneCard = memo(({ item }: { item: SafeZone }) => (
 
 export default function SafeZoneGuideScreen() {
     const navigation = useNavigation();
+    const s = useStrings();
+    const { speak } = useNarrator();
+
+    useEffect(() => { speak(s.screenSafeZones); }, []);
+
     return (
         <View style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
+                    <Text style={styles.backText}>{s.back}</Text>
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Safe Zones</Text>
+                <Text style={styles.headerTitle}>{s.safeZonesTitle}</Text>
             </View>
 
             <FlatList
@@ -50,7 +57,7 @@ export default function SafeZoneGuideScreen() {
                 contentContainerStyle={styles.listContent}
                 ListHeaderComponent={(
                     <View style={styles.checklistSection}>
-                        <Text style={styles.sectionTitle}>What to do now</Text>
+                        <Text style={styles.sectionTitle}>{s.whatToDoNow}</Text>
                         <GlassCard style={styles.checkCard}>
                             <Text style={styles.checkItem}>✓ Pack essentials (meds, documents)</Text>
                             <Text style={styles.checkItem}>✓ Monitor alerts offline</Text>
@@ -68,7 +75,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: Colors.background, paddingTop: 52 },
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 10 },
     backBtn: { paddingRight: 16, paddingVertical: 4 },
-    backText: { color: Colors.cyan, fontSize: 16 },
+    backText: { color: Colors.primary, fontSize: 16 },
     headerTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: 'bold' },
     listContent: { padding: 20, paddingBottom: 50 },
     sectionTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 15 },

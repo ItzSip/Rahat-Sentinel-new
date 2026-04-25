@@ -7,6 +7,8 @@ import androidx.core.app.NotificationCompat
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.rahat.MainActivity
+import com.rahat.service.Narrator
+import java.util.Locale
 
 /**
  * Native module exposed to JS as "ShakeModule".
@@ -33,6 +35,8 @@ class ShakeModule(private val reactContext: ReactApplicationContext)
         const val DISASTER_CHANNEL  = "rahat_disaster"
         const val DISASTER_NOTIF_ID = 2000
     }
+
+    private val narrator by lazy { Narrator(reactContext) }
 
     private val prefs by lazy {
         reactContext.getSharedPreferences(
@@ -148,6 +152,20 @@ class ShakeModule(private val reactContext: ReactApplicationContext)
         }
     }
 
+    // ── TTS narrator ─────────────────────────────────────────────────────────
+
+    @ReactMethod
+    fun speak(text: String, language: String) {
+        val locale = if (language == "Hindi") Locale("hi", "IN") else Locale.US
+        narrator.setLocale(locale)
+        narrator.speak(text)
+    }
+
+    @ReactMethod
+    fun stopSpeaking() {
+        narrator.stop()
+    }
+
     // ── Teardown ──────────────────────────────────────────────────────────────
 
     override fun onCatalystInstanceDestroy() {
@@ -155,6 +173,7 @@ class ShakeModule(private val reactContext: ReactApplicationContext)
             reactContext.unregisterReceiver(shakeReceiver)
             reactContext.unregisterReceiver(actionReceiver)
         } catch (_: Exception) {}
+        narrator.shutdown()
         super.onCatalystInstanceDestroy()
     }
 

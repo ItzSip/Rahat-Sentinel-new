@@ -22,9 +22,8 @@ class Narrator(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
-    fun setVolume(volume: Float) {
-        // TTS volume typically ranges from 0.0 to 1.0
-        // We can pass it in params or just store it for future speak calls
+    fun setLocale(locale: Locale) {
+        tts?.setLanguage(locale)
     }
 
     fun speak(text: String, volume: Float = 1.0f) {
@@ -35,10 +34,8 @@ class Narrator(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
-    fun speakIfEnabled(text: String, isEnabled: Boolean, volume: Float) {
-        if (isEnabled && isReady) {
-            speak(text, volume)
-        }
+    fun stop() {
+        tts?.stop()
     }
 
     fun shutdown() {

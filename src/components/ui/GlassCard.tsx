@@ -23,12 +23,7 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         padding: 16,
         marginVertical: 8,
-        // Soft shadows without heavy blur
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 5,
+        elevation: 0,
     },
 });
 

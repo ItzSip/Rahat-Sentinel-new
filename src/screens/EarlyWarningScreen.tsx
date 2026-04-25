@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Text, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useWarningStore, EarlyWarning } from '../store/warningStore';
@@ -6,6 +6,8 @@ import { Colors } from '../theme/colors';
 import { GlassCard } from '../components/ui/GlassCard';
 import { PillBadge } from '../components/ui/PillBadge';
 import { ActionButton } from '../components/ui/ActionButton';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
 const WarningRow = memo(({ item, isExpanded, onToggle }: { item: EarlyWarning, isExpanded: boolean, onToggle: () => void }) => {
     return (
@@ -45,6 +47,10 @@ export default function EarlyWarningScreen() {
     const navigation = useNavigation();
     const warnings = useWarningStore(state => state.warnings);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+    const s = useStrings();
+    const { speak } = useNarrator();
+
+    useEffect(() => { speak(s.screenEarlyWarning); }, []);
 
     const toggleExpand = (id: string) => {
         setExpandedIds(prev => {
@@ -59,13 +65,13 @@ export default function EarlyWarningScreen() {
         <View style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
+                    <Text style={styles.backText}>{s.back}</Text>
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Early Warnings</Text>
+                <Text style={styles.headerTitle}>{s.earlyWarnings}</Text>
             </View>
             {warnings.length === 0 ? (
                 <View style={styles.emptyState}>
-                    <Text style={styles.emptyText}>No predictive risks currently detected.</Text>
+                    <Text style={styles.emptyText}>{s.noWarnings}</Text>
                 </View>
             ) : (
                 <FlatList
@@ -89,7 +95,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: Colors.background, paddingTop: 52 },
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 10 },
     backBtn: { paddingRight: 16, paddingVertical: 4 },
-    backText: { color: Colors.cyan, fontSize: 16 },
+    backText: { color: Colors.primary, fontSize: 16 },
     headerTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: 'bold' },
     listContent: { padding: 20 },
     card: { marginBottom: 15 },

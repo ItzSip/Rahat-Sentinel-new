@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useEffect } from 'react';
 import {
     View, StyleSheet, Text, FlatList,
     TouchableOpacity, ActivityIndicator,
@@ -9,6 +9,8 @@ import { useDisasterStore } from '../store/disasterStore';
 import { useSeverity } from '../hooks/useSeverity';
 import { Colors } from '../theme/colors';
 import { GlassCard } from '../components/ui/GlassCard';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
 const SEV_COLOR = { GREEN: Colors.green, ORANGE: Colors.orange, RED: Colors.red } as const;
 const SEV_BG    = { GREEN: 'rgba(52,199,89,0.12)', ORANGE: 'rgba(255,159,10,0.12)', RED: 'rgba(255,59,59,0.12)' } as const;
@@ -62,7 +64,7 @@ const PeerRow = memo(({ peer, showLocation }: { peer: PeerDevice & { name?: stri
                 {showLocation && hasLoc && (
                     <Text style={styles.meta}>
                         Location:{' '}
-                        <Text style={{ color: Colors.cyan }}>
+                        <Text style={{ color: Colors.primary }}>
                             {peer.latitude!.toFixed(5)}, {peer.longitude!.toFixed(5)}
                         </Text>
                     </Text>
@@ -81,6 +83,10 @@ export default function NearbyDevicesScreen() {
     const isScanning       = useDeviceStore(s => s.isScanning);
     const isDisasterActive = useDisasterStore(s => s.isDisasterActive);
     const severity         = useSeverity();
+    const str              = useStrings();
+    const { speak }        = useNarrator();
+
+    useEffect(() => { speak(str.screenNearbyDevices); }, []);
 
     const renderItem = useCallback(({ item }: { item: PeerDevice }) => <PeerRow peer={item as any} showLocation={isDisasterActive} />, [isDisasterActive]);
     const keyExtractor = useCallback((item: PeerDevice) => item.id, []);
@@ -90,9 +96,9 @@ export default function NearbyDevicesScreen() {
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
+                    <Text style={styles.backText}>{str.back}</Text>
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Peer Network</Text>
+                <Text style={styles.headerTitle}>{str.peerNetwork}</Text>
                 {isScanning && (
                     <View style={styles.scanBadge}>
                         <ActivityIndicator size="small" color={Colors.cyan} />
@@ -118,23 +124,19 @@ export default function NearbyDevicesScreen() {
 
             {/* Summary bar */}
             <View style={styles.summaryBar}>
-                <Text style={styles.summaryText}>
-                    {peers.length} device{peers.length !== 1 ? 's' : ''} found
-                </Text>
+                <Text style={styles.summaryText}>{str.devicesFound(peers.length)}</Text>
                 <View style={[styles.statusDot, { backgroundColor: isScanning ? Colors.cyan : Colors.inactive }]} />
                 <Text style={[styles.summaryText, { color: isScanning ? Colors.cyan : Colors.textSecondary }]}>
-                    {isScanning ? 'BLE Active' : 'BLE Idle'}
+                    {isScanning ? str.bleActive : str.bleIdle}
                 </Text>
             </View>
 
             {peers.length === 0 ? (
                 <View style={styles.empty}>
                     <Text style={styles.emptyIcon}>📡</Text>
-                    <Text style={styles.emptyTitle}>No Peers Detected</Text>
+                    <Text style={styles.emptyTitle}>{str.noPeers}</Text>
                     <Text style={styles.emptySubtitle}>
-                        {isScanning
-                            ? 'BLE mesh is scanning. Other Rahat devices will appear here when in range.'
-                            : 'BLE mesh is idle. Restart the app to begin scanning.'}
+                        {isScanning ? str.noPeersBleHint : str.noPeersIdleHint}
                     </Text>
                     {!isDisasterActive && (
                         <Text style={[styles.emptySubtitle, { marginTop: 8, color: Colors.inactive }]}>
@@ -162,7 +164,7 @@ const styles = StyleSheet.create({
     container:    { flex: 1, backgroundColor: Colors.background, paddingTop: 52 },
     header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
     backBtn:      { paddingRight: 8, paddingVertical: 4 },
-    backText:     { color: Colors.cyan, fontSize: 16 },
+    backText:     { color: Colors.primary, fontSize: 16 },
     headerTitle:  { flex: 1, color: Colors.textPrimary, fontSize: 22, fontWeight: 'bold' },
     scanBadge:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
     scanText:     { color: Colors.cyan, fontSize: 13 },

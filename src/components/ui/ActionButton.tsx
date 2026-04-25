@@ -12,7 +12,7 @@ interface ActionButtonProps {
 const ActionButtonComponent = ({ label, onPress, variant = 'secondary', style }: ActionButtonProps) => {
     const getVariantStyle = () => {
         switch (variant) {
-            case 'primary': return { backgroundColor: Colors.cyan, borderColor: Colors.cyan };
+            case 'primary': return { backgroundColor: Colors.primary, borderColor: Colors.primary };
             case 'danger': return { backgroundColor: Colors.red, borderColor: Colors.red };
             default: return { backgroundColor: Colors.glassBackground, borderColor: Colors.glassBorder };
         }

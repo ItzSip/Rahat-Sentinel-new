@@ -1,15 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, TextInput, Modal, FlatList, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useUserStore } from '../store/userStore';
 import { Colors } from '../theme/colors';
 import { GlassCard } from '../components/ui/GlassCard';
 import { ActionButton } from '../components/ui/ActionButton';
+import { useStrings } from '../i18n/strings';
+import { useNarrator } from '../hooks/useNarrator';
 
 export default function ProfileScreen() {
     const navigation = useNavigation();
     const { profile, contacts, setProfile, addContact, removeContact } = useUserStore();
     const [modalVisible, setModalVisible] = useState(false);
+    const s = useStrings();
+    const { speak } = useNarrator();
+
+    useEffect(() => { speak(s.screenProfile); }, []);
     
     // Modal states
     const [editMode, setEditMode] = useState<'profile' | 'contact'>('profile');
@@ -43,9 +49,9 @@ export default function ProfileScreen() {
         <View style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Text style={styles.backText}>← Back</Text>
+                    <Text style={styles.backText}>{s.back}</Text>
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Profile</Text>
+                <Text style={styles.headerTitle}>{s.profile}</Text>
             </View>
             
             <View style={styles.section}>
@@ -126,7 +132,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: Colors.background, paddingTop: 52, paddingHorizontal: 20 },
     header: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
     backBtn: { paddingRight: 16, paddingVertical: 4 },
-    backText: { color: Colors.cyan, fontSize: 16 },
+    backText: { color: Colors.primary, fontSize: 16 },
     headerTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: 'bold' },
     section: { marginBottom: 30 },
     row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -135,7 +141,7 @@ const styles = StyleSheet.create({
     editBtn: { marginTop: 20 },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
     sectionTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: 'bold' },
-    addText: { color: Colors.cyan, fontSize: 16, fontWeight: 'bold' },
+    addText: { color: Colors.primary, fontSize: 16, fontWeight: 'bold' },
     contactCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingVertical: 12 },
     contactInfo: { flex: 1 },
     contactName: { color: Colors.textPrimary, fontSize: 16, fontWeight: 'bold', marginBottom: 2 },
