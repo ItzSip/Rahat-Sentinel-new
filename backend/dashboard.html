@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rahat Sentinel — Rescue Dashboard</title>
+<style>
+  :root {
+    --bg:       #0a0e1a;
+    --surface:  #111827;
+    --border:   #1f2937;
+    --cyan:     #00d4ff;
+    --green:    #22c55e;
+    --yellow:   #facc15;
+    --orange:   #f97316;
+    --red:      #ef4444;
+    --text:     #f1f5f9;
+    --muted:    #94a3b8;
+    --critical: #ff2d55;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: 56px 1fr;
+    grid-template-columns: 1fr;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .logo { font-size: 22px; }
+
+  header h1 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: .5px;
+    flex: 1;
+  }
+
+  #status-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: #1a2a1a;
+    color: var(--green);
+    border: 1px solid #22c55e44;
+    transition: all .3s;
+  }
+  #status-pill.disconnected { background: #2a1a1a; color: var(--red); border-color: #ef444444; }
+  #status-pill.connecting   { background: #1a1a2a; color: var(--cyan); border-color: #00d4ff44; }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: .4; transform: scale(.7); }
+  }
+
+  /* ── Layout ── */
+  main {
+    display: grid;
+    grid-template-columns: 340px 1fr 280px;
+    grid-template-rows: 1fr;
+    gap: 0;
+    overflow: hidden;
+    height: calc(100vh - 56px);
+  }
+
+  /* ── Panels ── */
+  .panel {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel:last-child { border-right: none; }
+
+  .panel-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .panel-header h2 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+
+  .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── Alert Feed ── */
+  #alert-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .alert-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: border-color .2s, box-shadow .2s;
+    animation: slideIn .3s ease;
+  }
+  .alert-card:hover { border-color: var(--cyan); box-shadow: 0 0 0 1px #00d4ff22; }
+  .alert-card.selected { border-color: var(--cyan); background: #00d4ff0a; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .alert-card.severity-critical { border-left: 3px solid var(--critical); }
+  .alert-card.severity-high     { border-left: 3px solid var(--red); }
+  .alert-card.severity-medium   { border-left: 3px solid var(--orange); }
+  .alert-card.severity-low      { border-left: 3px solid var(--yellow); }
+
+  .alert-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .alert-id { font-size: 11px; color: var(--muted); font-family: monospace; }
+  .alert-time { font-size: 11px; color: var(--muted); }
+
+  .alert-district { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+
+  .alert-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .badge-risk  { background: #ff2d5522; color: #ff2d55; }
+  .badge-sev   { background: #f9731622; color: #f97316; }
+  .badge-new   { background: #00d4ff22; color: var(--cyan); animation: fadeNew 2s ease forwards; }
+
+  @keyframes fadeNew { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* ── Heatmap ── */
+  #map-panel { border-right: 1px solid var(--border); }
+
+  #heatmap-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 16px;
+    gap: 12px;
+  }
+
+  #heatmap-canvas {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    image-rendering: pixelated;
+    max-width: 100%;
+    max-height: calc(100vh - 220px);
+    box-shadow: 0 0 24px #00d4ff22;
+  }
+
+  .heatmap-meta {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .heatmap-meta strong { color: var(--text); }
+
+  #legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  #legend-bar {
+    width: 120px;
+    height: 10px;
+    border-radius: 3px;
+    background: linear-gradient(to right, #001a00, #004d00, #facc15, #f97316, #ef4444, #ff2d55);
+    border: 1px solid #333;
+  }
+
+  /* ── System Status ── */
+  .stat-grid { display: flex; flex-direction: column; gap: 8px; }
+
+  .stat-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .stat-label { font-size: 12px; color: var(--muted); }
+  .stat-value { font-size: 14px; font-weight: 700; font-family: monospace; }
+  .stat-value.ok   { color: var(--green); }
+  .stat-value.warn { color: var(--yellow); }
+  .stat-value.crit { color: var(--red); }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+
+  /* ── Simulate button ── */
+  #sim-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: var(--cyan);
+    color: #000;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+  #sim-btn:hover { opacity: .85; }
+  #sim-btn:disabled { opacity: .4; cursor: default; }
+
+  /* ── BLE Mesh ── */
+  .peer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .peer-row:last-child { border-bottom: none; }
+  .peer-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Empty state ── */
+  .empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 32px 16px;
+    font-size: 13px;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--surface);
+    border: 1px solid var(--cyan);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    box-shadow: 0 4px 20px #00000066;
+    z-index: 100;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .3s, transform .3s;
+    pointer-events: none;
+    max-width: 300px;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">⛑</span>
+  <h1>Rahat Sentinel — Rescue Operations Dashboard</h1>
+  <div id="status-pill" class="connecting">
+    <div class="dot pulse"></div>
+    <span id="status-text">Connecting…</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Left: Alert Feed ── -->
+  <div class="panel" id="alerts-panel">
+    <div class="panel-header">
+      <h2>Live Alert Feed</h2>
+      <span id="alert-count" style="font-size:12px;color:var(--muted)">0 alerts</span>
+    </div>
+    <div class="panel-body">
+      <div id="alert-list">
+        <div class="empty">Waiting for alerts…<br><br>Start the backend or click <b>Simulate Alert</b></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Center: Heatmap ── -->
+  <div class="panel" id="map-panel">
+    <div class="panel-header">
+      <h2>Spatial Risk Heatmap — 20×20 Grid</h2>
+      <div id="legend">
+        <span>Low</span>
+        <div id="legend-bar"></div>
+        <span>Critical</span>
+      </div>
+    </div>
+    <div class="panel-body" style="padding:0;">
+      <div id="heatmap-wrap">
+        <canvas id="heatmap-canvas" width="400" height="400"></canvas>
+        <div class="heatmap-meta" id="heatmap-meta">
+          <span>District: <strong id="hm-district">—</strong></span>
+          <span>Risk: <strong id="hm-risk">—</strong></span>
+          <span>Severity: <strong id="hm-severity">—</strong></span>
+          <span>ID: <strong id="hm-id" style="font-family:monospace">—</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right: Stats + Controls ── -->
+  <div class="panel">
+    <div class="panel-header"><h2>System Status</h2></div>
+    <div class="panel-body">
+      <div class="stat-grid">
+        <div class="stat-item">
+          <span class="stat-label">Backend</span>
+          <span class="stat-value ok" id="stat-backend">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">WS Clients</span>
+          <span class="stat-value ok" id="stat-clients">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Cached Alerts</span>
+          <span class="stat-value" id="stat-cached">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Total Received</span>
+          <span class="stat-value ok" id="stat-total">0</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Highest Risk</span>
+          <span class="stat-value crit" id="stat-max-risk">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Last Alert</span>
+          <span class="stat-value" id="stat-last">—</span>
+        </div>
+      </div>
+
+      <hr class="divider" style="margin:14px 0;" />
+
+      <button id="sim-btn" onclick="simulateAlert()">⚡ Simulate Alert</button>
+
+      <hr class="divider" style="margin:14px 0;" />
+
+      <div class="panel-header" style="padding:0 0 8px 0; background:transparent; border:none;">
+        <h2>BLE Mesh Peers</h2>
+      </div>
+      <div id="peer-list">
+        <div class="empty" style="padding:16px 0;">No peers detected</div>
+      </div>
+
+      <hr class="divider" style="margin:14px 0;" />
+
+      <div class="panel-header" style="padding:0 0 8px 0; background:transparent; border:none;">
+        <h2>Event Log</h2>
+      </div>
+      <div id="event-log" style="font-size:11px; color:var(--muted); max-height:160px; overflow-y:auto; font-family:monospace; line-height:1.6;"></div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ─── Config ────────────────────────────────────────────────────────
+const WS_URL  = 'ws://localhost:8000/ws/alerts';
+const API_URL = 'http://localhost:8000';
+const GRID    = 20;
+const CELL_PX = 20; // canvas pixels per cell
+
+// ─── State ────────────────────────────────────────────────────────
+let ws         = null;
+let alerts     = [];
+let selected   = null;
+let totalRx    = 0;
+let maxRisk    = 0;
+let reconnectTimer = null;
+
+// ─── Canvas Setup ─────────────────────────────────────────────────
+const canvas = document.getElementById('heatmap-canvas');
+const ctx    = canvas.getContext('2d');
+canvas.width  = GRID * CELL_PX;
+canvas.height = GRID * CELL_PX;
+
+function riskColor(v) {
+  // 0→dark green → yellow → orange → red → crimson
+  if (v < 0.001) return [8, 20, 8];
+  if (v < 0.25)  return lerp([0, 30, 0], [100, 180, 0], v / 0.25);
+  if (v < 0.5)   return lerp([100, 180, 0], [250, 200, 0], (v - 0.25) / 0.25);
+  if (v < 0.75)  return lerp([250, 200, 0], [249, 115, 22], (v - 0.5) / 0.25);
+  if (v < 0.9)   return lerp([249, 115, 22], [239, 68, 68], (v - 0.75) / 0.15);
+  return lerp([239, 68, 68], [255, 45, 85], (v - 0.9) / 0.1);
+}
+
+function lerp(a, b, t) {
+  return a.map((v, i) => Math.round(v + (b[i] - v) * Math.min(t, 1)));
+}
+
+function drawGrid(cells) {
+  for (let r = 0; r < GRID; r++) {
+    for (let c = 0; c < GRID; c++) {
+      const v = (cells[r] && cells[r][c] != null) ? cells[r][c] : 0;
+      const [R, G, B] = riskColor(v);
+      ctx.fillStyle = `rgb(${R},${G},${B})`;
+      ctx.fillRect(c * CELL_PX, r * CELL_PX, CELL_PX, CELL_PX);
+    }
+  }
+}
+
+function clearGrid() {
+  ctx.fillStyle = '#080e08';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+clearGrid();
+
+// ─── Alert rendering ──────────────────────────────────────────────
+function severityClass(risk) {
+  if (risk >= 0.9) return 'critical';
+  if (risk >= 0.7) return 'high';
+  if (risk >= 0.5) return 'medium';
+  return 'low';
+}
+
+function fmtTime(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('en-GB', { hour12: false });
+  } catch { return '—'; }
+}
+
+function renderAlerts() {
+  const list = document.getElementById('alert-list');
+  if (alerts.length === 0) {
+    list.innerHTML = '<div class="empty">Waiting for alerts…<br><br>Start the backend or click <b>Simulate Alert</b></div>';
+    document.getElementById('alert-count').textContent = '0 alerts';
+    return;
+  }
+
+  document.getElementById('alert-count').textContent = `${alerts.length} alert${alerts.length !== 1 ? 's' : ''}`;
+
+  list.innerHTML = alerts.slice().reverse().map((a, i) => {
+    const sc   = severityClass(a.risk_score);
+    const isNew = i === 0;
+    const isSel = selected === a.id;
+    return `<div class="alert-card severity-${sc}${isSel ? ' selected' : ''}" onclick="selectAlert('${a.id}')">
+      <div class="alert-top">
+        <span class="alert-id">#${a.id}</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${isNew ? '<span class="badge badge-new">NEW</span>' : ''}
+          <span class="alert-time">${fmtTime(a.timestamp)}</span>
+        </div>
+      </div>
+      <div class="alert-district">${a.district || 'Unknown District'}</div>
+      <div class="alert-meta">
+        <span class="badge badge-risk">Risk ${(a.risk_score * 100).toFixed(1)}%</span>
+        <span class="badge badge-sev">Sev ${a.severity}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectAlert(id) {
+  const alert = alerts.find(a => a.id === id);
+  if (!alert) return;
+  selected = id;
+  renderAlerts();
+  if (alert.cells) drawGrid(alert.cells);
+  document.getElementById('hm-district').textContent  = alert.district || '—';
+  document.getElementById('hm-risk').textContent      = `${(alert.risk_score * 100).toFixed(1)}%`;
+  document.getElementById('hm-severity').textContent  = alert.severity;
+  document.getElementById('hm-id').textContent        = `#${alert.id}`;
+}
+
+// ─── Ingest alert ─────────────────────────────────────────────────
+function ingestAlert(a) {
+  totalRx++;
+  if (a.risk_score > maxRisk) maxRisk = a.risk_score;
+
+  // Dedupe by id
+  if (!alerts.find(x => x.id === a.id)) {
+    alerts.push(a);
+    if (alerts.length > 50) alerts.shift();
+  }
+
+  renderAlerts();
+  updateStats();
+
+  // Auto-select the newest
+  selected = a.id;
+  selectAlert(a.id);
+
+  addLog(`📡 Alert #${a.id} — ${a.district} risk=${(a.risk_score*100).toFixed(1)}%`);
+
+  if (a.risk_score >= 0.9) {
+    showToast(`🚨 CRITICAL: ${a.district} — ${(a.risk_score*100).toFixed(1)}% risk`);
+  }
+}
+
+// ─── Stats ────────────────────────────────────────────────────────
+function updateStats() {
+  document.getElementById('stat-total').textContent    = totalRx;
+  const el = document.getElementById('stat-max-risk');
+  el.textContent = maxRisk ? `${(maxRisk*100).toFixed(1)}%` : '—';
+  el.className   = `stat-value ${maxRisk >= 0.9 ? 'crit' : maxRisk >= 0.6 ? 'warn' : 'ok'}`;
+  const last = alerts[alerts.length - 1];
+  document.getElementById('stat-last').textContent = last ? fmtTime(last.timestamp) : '—';
+}
+
+async function pollHealth() {
+  try {
+    const r = await fetch(`${API_URL}/`);
+    const d = await r.json();
+    document.getElementById('stat-backend').textContent  = 'Online';
+    document.getElementById('stat-backend').className    = 'stat-value ok';
+    document.getElementById('stat-clients').textContent  = d.ws_clients ?? '—';
+    document.getElementById('stat-cached').textContent   = d.cached_alerts ?? '—';
+  } catch {
+    document.getElementById('stat-backend').textContent = 'Offline';
+    document.getElementById('stat-backend').className   = 'stat-value crit';
+  }
+}
+
+// ─── WebSocket ────────────────────────────────────────────────────
+function setStatus(state, text) {
+  const pill = document.getElementById('status-pill');
+  const dot  = pill.querySelector('.dot');
+  document.getElementById('status-text').textContent = text;
+  pill.className = `${state}`;
+  dot.className  = state === 'connected' ? 'dot pulse' : 'dot';
+}
+
+function connect() {
+  setStatus('connecting', 'Connecting…');
+  addLog('🔌 Connecting to ws://localhost:8000/ws/alerts');
+
+  try { ws = new WebSocket(WS_URL); } catch(e) { scheduleReconnect(); return; }
+
+  ws.onopen = () => {
+    setStatus('connected', 'Live');
+    addLog('✅ WebSocket connected');
+    pollHealth();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
+
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+
+    if (msg.event === 'new_alert' && msg.data) {
+      ingestAlert(msg.data);
+    } else if (msg.event === 'history' && Array.isArray(msg.data)) {
+      msg.data.forEach(a => ingestAlert(a));
+      addLog(`📜 Loaded ${msg.data.length} history alert(s)`);
+    } else if (msg.event === 'heartbeat') {
+      // silent
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus('disconnected', 'Disconnected');
+    addLog('⚠ WebSocket closed — retrying in 3s…');
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    setStatus('disconnected', 'Connection failed');
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 3000);
+}
+
+// Ping to keep connection alive
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+}, 25000);
+
+// Poll health every 10s
+setInterval(pollHealth, 10000);
+
+// ─── Simulate alert ───────────────────────────────────────────────
+async function simulateAlert() {
+  const btn = document.getElementById('sim-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Sending…';
+  try {
+    const r = await fetch(`${API_URL}/api/alerts/simulate`, { method: 'POST' });
+    const d = await r.json();
+    if (d.status === 'published') {
+      addLog(`⚡ Simulated alert ${d.alert_id} published (risk=${(d.risk_score*100).toFixed(1)}%)`);
+      showToast(`✅ Alert published — ${(d.risk_score*100).toFixed(1)}% risk`);
+    } else {
+      addLog(`❌ Simulate failed: ${d.detail || 'unknown'}`);
+    }
+  } catch(e) {
+    addLog(`❌ Cannot reach backend: ${e.message}`);
+    showToast('❌ Backend not reachable. Start Docker first.');
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = '⚡ Simulate Alert'; }, 1000);
+}
+
+// ─── Event log ────────────────────────────────────────────────────
+function addLog(msg) {
+  const el = document.getElementById('event-log');
+  const t  = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  el.innerHTML = `<span style="color:var(--muted)">[${t}]</span> ${msg}\n` + el.innerHTML;
+  // Keep last 60 lines
+  const lines = el.innerHTML.split('\n');
+  if (lines.length > 60) el.innerHTML = lines.slice(0, 60).join('\n');
+}
+
+// ─── Toast ────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// ─── BLE peer simulation (mirrors device logs) ────────────────────
+const DEMO_PEERS = [
+  { mac: '68:46:3B:40:E0:61', status: 'SOS', rssi: -65, trend: 'APPROACHING' },
+  { mac: 'A1:B2:C3:D4:E5:F6', status: 'OK',  rssi: -78, trend: 'STABLE' },
+];
+
+function renderPeers() {
+  const el = document.getElementById('peer-list');
+  el.innerHTML = DEMO_PEERS.map(p => {
+    const col = p.status === 'SOS' ? 'var(--red)' : 'var(--green)';
+    return `<div class="peer-row">
+      <div class="peer-dot" style="background:${col}"></div>
+      <div style="flex:1">
+        <div style="font-family:monospace;font-size:11px">${p.mac}</div>
+        <div style="font-size:11px;color:var(--muted)">${p.trend} · RSSI ${p.rssi} dBm</div>
+      </div>
+      <span class="badge" style="background:${p.status==='SOS'?'#ef444422':'#22c55e22'};color:${col}">${p.status}</span>
+    </div>`;
+  }).join('');
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────
+renderPeers();
+connect();
+</script>
+</body>
+</html>
