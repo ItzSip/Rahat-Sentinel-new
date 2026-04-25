@@ -1,3 +1,10 @@
+// ROOT-LEVEL GRADLE — builds the legacy Native Compose module (app/).
+// ⚠ DO NOT run ./gradlew installDebug from this directory.
+//   The active React Native app is built from android/ via:
+//   cd android && .\gradlew.bat app:installDebug
+//   (or: npx react-native run-android)
+// Running root gradlew WILL overwrite the RN APK on device with the Compose build.
+
 rootProject.name = 'Rahat'
 
 dependencyResolutionManagement {
@@ -10,5 +17,3 @@ dependencyResolutionManagement {
 }
 
 include ':app'
-rootProject.name = "Rahat"
-include(":app")
