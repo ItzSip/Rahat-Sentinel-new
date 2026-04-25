@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.*
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -66,30 +65,17 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
             Log.i(TAG, "BLE_SCAN_JOB_STARTED")
             while (isActive) {
                 try {
-                    // ── Settings: Low-latency, all matches ──────────────────────────────
-                    val settingsBuilder = ScanSettings.Builder()
+                    // Always scan in legacy mode. Extended scanning (setLegacy=false) with
+                    // a manufacturer-data ScanFilter silently drops legacy advertising packets
+                    // on many Android devices — the filter only matches Extended Advertising Data.
+                    // Our advertiser uses legacy mode (ADV_IND PDU) for the same compatibility
+                    // reason, so the scanner must match.
+                    val settings = ScanSettings.Builder()
                         .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                         .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-                        .setLegacy(true)  // start with legacy; we add Coded separately
-
-                    // Attempt to enable Coded PHY scanning on API 26+ capable hardware
-                    // for extended range (if bluetoothAdapter.isLeCodedPhySupported)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                        adapterLocal.isLeCodedPhySupported) {
-                        try {
-                            settingsBuilder
-                                .setLegacy(false)   // enable extended scanning
-                                .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)  // 1M + Coded
-                            Log.i(TAG, "BLE_SCAN_MODE: Extended (1M + Coded PHY) — MAX RANGE")
-                        } catch (e: Exception) {
-                            settingsBuilder.setLegacy(true)
-                            Log.w(TAG, "BLE_SCAN_MODE: Coded PHY unavailable, falling back to 1M")
-                        }
-                    } else {
-                        Log.i(TAG, "BLE_SCAN_MODE: Legacy 1M PHY")
-                    }
-
-                    val settings = settingsBuilder.build()
+                        .setLegacy(true)
+                        .build()
+                    Log.i(TAG, "BLE_SCAN_MODE: Legacy 1M PHY (manufacturer-filter compatible)")
 
                     // Filter: manufacturer ID with empty mask (match any payload)
                     val emptyData = byteArrayOf()
