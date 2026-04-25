@@ -1,4 +1,4 @@
-export type EventType = 'SOS' | 'LOCATION' | 'PING';
+export type EventType = 'SOS' | 'LOCATION' | 'PING' | 'DISASTER';
 
 export interface LocationPayload {
     lat: number;

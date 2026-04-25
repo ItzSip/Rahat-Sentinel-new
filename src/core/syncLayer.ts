@@ -122,13 +122,13 @@ export const handleEvent = (event: RahatEvent) => {
     }
 
     // BLE path — all batching logic below is unchanged
-    // 2. SOS override logic -> immediate send
-    if (event.type === 'SOS') {
+    // 2. SOS / DISASTER -> immediate send (high-urgency, never batch)
+    if (event.type === 'SOS' || event.type === 'DISASTER') {
         flushBatch(); // Flush existing queue first
         try {
             sendFrame(JSON.stringify([event]));
         } catch (e) {
-            // SOS doesn't requeue
+            // SOS/DISASTER never requeue
         }
     } else if (event.type === 'LOCATION') {
         // 3. LOCATION -> flush immediately after push

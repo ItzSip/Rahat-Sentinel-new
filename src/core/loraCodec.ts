@@ -12,18 +12,21 @@ const TYPE_CHAR: Record<EventType, string> = {
     SOS:      'S',
     LOCATION: 'L',
     PING:     'P',
+    DISASTER: 'D',
 };
 
 const CHAR_TYPE: Record<string, EventType> = {
     S: 'SOS',
     L: 'LOCATION',
     P: 'PING',
+    D: 'DISASTER',
 };
 
 const TYPE_PRIORITY: Record<EventType, number> = {
     SOS:      3,
     LOCATION: 2,
     PING:     1,
+    DISASTER: 4,
 };
 
 /**

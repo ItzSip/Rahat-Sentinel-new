@@ -9,6 +9,7 @@ import {
     Platform,
     AppState,
     AppStateStatus,
+    Linking,
 } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -72,8 +73,64 @@ const ACCURACY_FILL_STYLE   = { fillColor: 'rgba(50,173,230,0.12)', fillOutlineC
 const PEER_OUTLINE_STYLE    = { circleRadius: 10, circleColor: '#ffffff' };
 const PEER_FILL_STYLE       = {
     circleRadius: 7,
-    // MapLibre expression — cast needed because TS can't infer nested array as Expression
-    circleColor: ['match', ['get', 'severity'], 'HIGH', Colors.red, 'CRITICAL', Colors.red, Colors.orange] as any,
+    // Data-driven: severity string from GeoJSON feature → circle color
+    // Values emitted by PeerManager: "GREEN", "ORANGE", "RED", "NORMAL"
+    circleColor: ['match', ['get', 'severity'],
+        'RED',    Colors.red,
+        'ORANGE', Colors.orange,
+        'GREEN',  Colors.green,
+        Colors.green,  // NORMAL (no disaster active on peer)
+    ] as any,
+};
+
+// Minimal MapLibre base style — provides a dark background so the GL context
+// initialises correctly. OSM raster tiles are added via RasterSource inside MapView.
+// Without this, MapLibre v10 renders a black canvas.
+const MAP_BASE_STYLE = JSON.stringify({
+    version: 8,
+    sources: {},
+    layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#040b16' } }],
+});
+
+// ── Icon components ──────────────────────────────────────────────────────────
+// Drawn with pure Views — no icon library needed.
+
+/** Classic map-pin: circle outline + centre dot + downward triangle tip */
+const GpsIcon = ({ color }: { color: string }) => (
+    <View style={{ alignItems: 'center', width: 18, height: 24 }}>
+        <View style={{
+            width: 16, height: 16, borderRadius: 8,
+            borderWidth: 2.5, borderColor: color,
+            alignItems: 'center', justifyContent: 'center',
+        }}>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: color }} />
+        </View>
+        {/* pin tip */}
+        <View style={{
+            width: 0, height: 0, marginTop: -1,
+            borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 7,
+            borderLeftColor: 'transparent', borderRightColor: 'transparent',
+            borderTopColor: color,
+        }} />
+    </View>
+);
+
+/** Bluetooth broadcast icon: 3 concentric signal arcs */
+const BleIcon = ({ color }: { color: string }) => {
+    const arc = (size: number) => ({
+        width: size, height: size / 2,
+        borderTopLeftRadius: size / 2, borderTopRightRadius: size / 2,
+        borderWidth: 2, borderBottomWidth: 0,
+        borderColor: color,
+        marginBottom: 2,
+    });
+    return (
+        <View style={{ alignItems: 'center', justifyContent: 'flex-end', width: 20, height: 20 }}>
+            <View style={arc(14)} />
+            <View style={arc(9)} />
+            <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: color }} />
+        </View>
+    );
 };
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
@@ -176,6 +233,7 @@ export default function HomeScreen() {
 
     const peers = useDeviceStore(state => state.peers);
     const isScanning = useDeviceStore(state => state.isScanning);
+    const setMyLocation = useDeviceStore(state => state.setMyLocation);
     const profile = useUserStore(state => state.profile);
 
     const isDisasterActive = useDisasterStore(s => s.isDisasterActive);
@@ -209,6 +267,15 @@ export default function HomeScreen() {
             userLocation.accuracy,
         );
     }, [userLocation]);
+
+    // Worst severity across all nearby peers — drives the pill dot colour.
+    // HIGH (distress) → red   |   all NORMAL → green   |   no peers → inactive/cyan
+    const worstPeerSeverity = useMemo(() => {
+        if (peers.some(p => p.severity === 'RED'))    return 'RED';
+        if (peers.some(p => p.severity === 'ORANGE')) return 'ORANGE';
+        if (peers.some(p => p.severity === 'GREEN'))  return 'GREEN';
+        return peers.length > 0 ? 'NORMAL' : 'NONE';
+    }, [peers]);
 
     // GeoJSON FeatureCollection for MapLibre GPU rendering
     const peerFeatures = useMemo(() => {
@@ -320,9 +387,30 @@ export default function HomeScreen() {
         // ── Accept — update rendered state and notify BLE layer ─────────────
         lastRenderedRef.current = { latitude: lat, longitude: lng };
         setUserLocation({ latitude: lat, longitude: lng, accuracy });
+        setMyLocation({ latitude: lat, longitude: lng }); // shared with disaster hooks
 
         if (NativeModules.RahatMesh) {
             NativeModules.RahatMesh.updateLocation(lat, lng);
+        }
+    }, []);
+
+    const handleLocationPress = useCallback(() => {
+        if (Platform.OS === 'android') {
+            Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => {
+                Linking.openSettings();
+            });
+        } else {
+            Linking.openSettings();
+        }
+    }, []);
+
+    const handleBtPress = useCallback(() => {
+        if (Platform.OS === 'android') {
+            Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS').catch(() => {
+                Linking.openSettings();
+            });
+        } else {
+            Linking.openSettings();
         }
     }, []);
 
@@ -336,9 +424,12 @@ export default function HomeScreen() {
 
     return (
         <View style={styles.container}>
-            {/* Full-screen OSM map — no Google dependencies */}
+            {/* Full-screen OSM map — no Google dependencies.
+                styleURL provides a minimal base style so the GL context
+                initialises (without it MapLibre v10 renders a black canvas). */}
             <MapLibreGL.MapView
                 style={StyleSheet.absoluteFillObject}
+                mapStyle={MAP_BASE_STYLE}
                 logoEnabled={false}
                 attributionEnabled={false}
                 rotateEnabled={false}
@@ -406,7 +497,7 @@ export default function HomeScreen() {
                     <Text style={styles.titleText}>Rahat</Text>
                 </View>
 
-                <View style={styles.rightIcons} pointerEvents="none">
+                <View style={styles.rightIcons}>
                     {/* Severity badge — only visible when disaster is active */}
                     {isDisasterActive && (
                         <View style={[
@@ -420,23 +511,37 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                    {/* Location status — display only, no touch */}
-                    <View style={[styles.statusIcon, locationOn && styles.statusIconOn]}>
-                        <Text style={styles.statusEmoji}>📍</Text>
-                        <View style={[
-                            styles.statusDot,
-                            { backgroundColor: locationOn ? Colors.green : Colors.inactive },
-                        ]} />
-                    </View>
+                    {/* Location status button — tap opens device location settings */}
+                    <TouchableOpacity
+                        style={[
+                            styles.statusBtn,
+                            locationOn ? styles.statusBtnGpsOn : styles.statusBtnOff,
+                        ]}
+                        onPress={handleLocationPress}
+                        activeOpacity={0.75}
+                    >
+                        <GpsIcon color={locationOn ? Colors.green : Colors.inactive} />
+                        <Text style={[
+                            styles.statusLabel,
+                            { color: locationOn ? Colors.green : Colors.inactive },
+                        ]}>GPS</Text>
+                    </TouchableOpacity>
 
-                    {/* Bluetooth status — display only, no touch */}
-                    <View style={[styles.statusIcon, btOn && styles.statusIconOn]}>
-                        <Text style={styles.statusEmoji}>⬡</Text>
-                        <View style={[
-                            styles.statusDot,
-                            { backgroundColor: btOn ? Colors.cyan : Colors.inactive },
-                        ]} />
-                    </View>
+                    {/* BLE status button — tap opens device Bluetooth settings */}
+                    <TouchableOpacity
+                        style={[
+                            styles.statusBtn,
+                            btOn ? styles.statusBtnBleOn : styles.statusBtnOff,
+                        ]}
+                        onPress={handleBtPress}
+                        activeOpacity={0.75}
+                    >
+                        <BleIcon color={btOn ? Colors.cyan : Colors.inactive} />
+                        <Text style={[
+                            styles.statusLabel,
+                            { color: btOn ? Colors.cyan : Colors.inactive },
+                        ]}>BLE</Text>
+                    </TouchableOpacity>
                 </View>
             </View>
 
@@ -450,12 +555,20 @@ export default function HomeScreen() {
                 >
                     <View style={[
                         styles.pillDot,
-                        { backgroundColor: isScanning ? Colors.cyan : Colors.green },
+                        {
+                            backgroundColor:
+                                worstPeerSeverity === 'RED'    ? Colors.red    :
+                                worstPeerSeverity === 'ORANGE' ? Colors.orange :
+                                worstPeerSeverity === 'GREEN'  ? Colors.green  :
+                                worstPeerSeverity === 'NORMAL' ? Colors.green  :
+                                isScanning                     ? Colors.cyan   :
+                                Colors.inactive,
+                        },
                     ]} />
                     <Text style={styles.nearbyPillText}>
-                        {isScanning
-                            ? 'Scanning...'
-                            : `Nearby Help${peers.length > 0 ? ` · ${peers.length}` : ''}`}
+                        {peers.length > 0
+                            ? `Nearby · ${peers.length}`
+                            : isScanning ? 'Scanning...' : 'Nearby Help'}
                     </Text>
                 </TouchableOpacity>
 
@@ -521,29 +634,33 @@ const styles = StyleSheet.create({
     hamburger: { color: Colors.textPrimary, fontSize: 22 },
     titleWrap: { flex: 1, alignItems: 'center' },
     titleText: { color: Colors.textPrimary, fontSize: 20, fontWeight: 'bold', letterSpacing: 1 },
-    rightIcons: { flexDirection: 'row', gap: 8 },
-    statusIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: Colors.glassBackground,
+    rightIcons: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+    statusBtn: {
+        width: 48,
+        height: 52,
+        borderRadius: 14,
         borderWidth: 1,
-        borderColor: Colors.glassBorder,
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 4,
+        paddingVertical: 6,
     },
-    statusIconOn: {
-        borderColor: Colors.cyan,
-        backgroundColor: 'rgba(50,173,230,0.15)',
+    statusBtnOff: {
+        backgroundColor: Colors.glassBackground,
+        borderColor: Colors.glassBorder,
     },
-    statusEmoji: { fontSize: 18 },
-    statusDot: {
-        position: 'absolute',
-        bottom: 6,
-        right: 6,
-        width: 8,
-        height: 8,
-        borderRadius: 4,
+    statusBtnGpsOn: {
+        backgroundColor: 'rgba(52,199,89,0.12)',
+        borderColor: 'rgba(52,199,89,0.5)',
+    },
+    statusBtnBleOn: {
+        backgroundColor: 'rgba(50,173,230,0.12)',
+        borderColor: 'rgba(50,173,230,0.5)',
+    },
+    statusLabel: {
+        fontSize: 9,
+        fontWeight: '700' as const,
+        letterSpacing: 0.5,
     },
 
     // Bottom overlay

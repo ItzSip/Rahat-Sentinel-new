@@ -65,31 +65,22 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
             Log.i(TAG, "BLE_SCAN_JOB_STARTED")
             while (isActive) {
                 try {
-                    // Always scan in legacy mode. Extended scanning (setLegacy=false) with
-                    // a manufacturer-data ScanFilter silently drops legacy advertising packets
-                    // on many Android devices — the filter only matches Extended Advertising Data.
-                    // Our advertiser uses legacy mode (ADV_IND PDU) for the same compatibility
-                    // reason, so the scanner must match.
+                    // Scan with NO hardware ScanFilter — hardware filters behave inconsistently
+                    // across chipsets (Motorola Edge 60, G45, Pixel, etc.). A manufacturer-data
+                    // filter with an empty mask silently drops matching packets on some devices.
+                    // We pass null and do the manufacturer-ID check in the callback instead.
                     val settings = ScanSettings.Builder()
                         .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                         .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
                         .setLegacy(true)
                         .build()
-                    Log.i(TAG, "BLE_SCAN_MODE: Legacy 1M PHY (manufacturer-filter compatible)")
-
-                    // Filter: manufacturer ID with empty mask (match any payload)
-                    val emptyData = byteArrayOf()
-                    val filters = listOf(
-                        ScanFilter.Builder()
-                            .setManufacturerData(MANUFACTURER_ID, emptyData, emptyData)
-                            .build()
-                    )
+                    Log.i(TAG, "BLE_SCAN_MODE: Legacy 1M PHY (no hardware filter — callback-filtered)")
 
                     val cb = createScanCallback()
                     scanCallback = cb
 
                     Log.i(TAG, "BLE_SCAN_WINDOW_OPEN: ${SCAN_DURATION_MS/1000}s")
-                    scannerLocal.startScan(filters, settings, cb)
+                    scannerLocal.startScan(null, settings, cb)
 
                     delay(SCAN_DURATION_MS)
 
@@ -163,8 +154,8 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
             buffer.get(idBytes)
             val ephId = idBytes.joinToString("") { "%02x".format(it) }
 
-            val status   = buffer.get().toInt()
-            val severity = if (status == 1) 2 else 1
+            val status   = buffer.get().toInt() and 0xFF
+            val severity = status.coerceIn(0, 3) // 0=OK,1=GREEN,2=ORANGE,3=RED
 
             // Parse GPS if payload is extended (23+ bytes) — lat/lng as signed int24 LE × 10000
             var lat: Double? = null
@@ -189,7 +180,7 @@ class BleScanner(private val context: Context, private val peerManager: PeerMana
             }
 
             Log.i(TAG, "BLE_RAHAT_PEER: MAC=$mac EphID=${ephId.take(8)} " +
-                "Status=${if (status == 1) "SOS" else "OK"} RSSI=$rssi " +
+                "Status=${when(status){0->"OK";1->"GREEN";2->"ORANGE";else->"RED"}} RSSI=$rssi " +
                 "GPS=${if (lat != null) "${"%.4f".format(lat)},${"%.4f".format(lng)}" else "none"}")
 
             peerManager.onRawPeerDiscovery(mac, ephId, severity, false, rssi, lat, lng)

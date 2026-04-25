@@ -91,6 +91,32 @@ class WebSocketMessage(BaseModel):
     """Envelope sent over the WebSocket connection."""
 
     event: str = Field(
-        ..., description="Event type: 'new_alert' | 'history' | 'heartbeat'"
+        ..., description="Event type: 'new_alert' | 'history' | 'heartbeat' | 'esp32_update' | 'esp32_list'"
     )
     data: Optional[dict | list] = None
+
+
+# ---------------------------------------------------------------------------
+# ESP32 device model
+# ---------------------------------------------------------------------------
+
+class ESP32Device(BaseModel):
+    """Location + severity packet from an ESP32 field node."""
+
+    device_id: str = Field(..., description="Unique device identifier, e.g. 'ESP32_01'")
+    name: str = Field(default="", description="Optional human-readable label")
+    lat: float = Field(..., ge=-90.0, le=90.0, description="Latitude")
+    lon: float = Field(..., ge=-180.0, le=180.0, description="Longitude")
+    severity: str = Field(
+        default="LOW",
+        description="Severity tier: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'",
+    )
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class ESP32ListResponse(BaseModel):
+    status: str = "ok"
+    count: int
+    devices: list[ESP32Device]

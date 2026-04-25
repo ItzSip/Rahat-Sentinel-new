@@ -150,7 +150,7 @@ class PeerManager(private val scope: CoroutineScope) {
             PeerState(
                 rId = "PEER_${data.currentEphId.take(6)}",
                 name = "Nearby Device (${data.currentMacAddress.takeLast(4)})",
-                severity = if (data.severity == 2) "HIGH" else "NORMAL",
+                severity = when (data.severity) { 1 -> "GREEN"; 2 -> "ORANGE"; 3 -> "RED"; else -> "NORMAL" },
                 signalLevel = data.getSignalLevel(filteredRssi),
                 signalTrend = data.computeTrend(),
                 lastSeen = data.lastSeen,

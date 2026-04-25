@@ -15,6 +15,8 @@ let storedEvents: RahatEvent[] = [];
 let outboundListener: ((event: RahatEvent) => void) | null = null;
 // Separate hook for UI/store layer — fired after a LOCATION passes all checks
 let locationListener: ((event: RahatEvent) => void) | null = null;
+// Fired when a DISASTER frame arrives from a remote peer — triggers local activation
+let disasterListener: (() => void) | null = null;
 let relayCount = 0;
 
 export const getRelayCount = () => relayCount;
@@ -33,9 +35,10 @@ const isExpired = (event: RahatEvent): boolean => {
 };
 
 const shouldBroadcast = (event: RahatEvent): boolean => {
-  if (event.type === 'SOS') return true;
+  if (event.type === 'SOS')      return true;
   if (event.type === 'LOCATION') return true;
-  if (event.type === 'PING') return event.hops === 0; // PING origin only
+  if (event.type === 'DISASTER') return true; // relay disaster activation mesh-wide
+  if (event.type === 'PING')     return event.hops === 0; // PING origin only
   return false;
 };
 
@@ -47,6 +50,11 @@ export const setOutboundListener = (fn: (event: RahatEvent) => void) => {
 /** Called by locationBridge — fires after a LOCATION event passes all validation. */
 export const setLocationListener = (fn: (event: RahatEvent) => void) => {
   locationListener = fn;
+};
+
+/** Registered by useDisasterEffect — fires when a remote DISASTER frame is received. */
+export const setDisasterListener = (fn: (() => void) | null) => {
+  disasterListener = fn;
 };
 
 export const processIncomingEvent = (event: RahatEvent): void => {
@@ -101,6 +109,11 @@ export const processIncomingEvent = (event: RahatEvent): void => {
     locationListener(processedEvent);
   }
 
+  // 7b. Notify disaster bridge — remote activation auto-sync
+  if (processedEvent.type === 'DISASTER' && disasterListener) {
+    disasterListener();
+  }
+
   // 8. Dispatch to transport if allowed
   if (shouldBroadcast(processedEvent) && outboundListener) {
     outboundListener(processedEvent);
@@ -134,6 +147,29 @@ export function emitTestEvent(type: 'SOS' | 'LOCATION') {
     };
 
     processIncomingEvent(event);
+}
+
+/**
+ * Broadcast a DISASTER activation frame to all BLE peers.
+ * Called once on fresh local activation — bypasses local processing so it
+ * doesn't re-trigger the disasterListener on the originating device.
+ */
+export function emitDisasterSync() {
+    const event: RahatEvent = {
+        id: `evt_dis_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+        type: 'DISASTER',
+        payload: {},
+        timestamp: Date.now(),
+        ttl: 120,      // 2-minute window for propagation
+        priority: 4,   // above SOS so it's never evicted
+        origin: getDeviceIdSync(),
+        hops: 0,
+    };
+    // Pre-mark so if this frame somehow loops back we don't re-activate locally
+    seenEventIds.add(event.id);
+    if (outboundListener) {
+        outboundListener(event);
+    }
 }
 
 // Readonly access for debug/test

@@ -35,10 +35,16 @@ from .ble_codec import pack_alert, unpack_alert, PAYLOAD_SIZE
 from .models import (
     AlertHistoryResponse,
     AlertResponse,
+    ESP32Device,
+    ESP32ListResponse,
     SentinelAlert,
     WebSocketMessage,
 )
 from .redis_listener import start_listener
+
+# In-memory store for ESP32 devices keyed by device_id
+_esp32_store: dict[str, ESP32Device] = {}
+_esp32_lock = asyncio.Lock()
 
 load_dotenv()
 
@@ -75,6 +81,15 @@ class ConnectionManager:
         )
         await ws.send_text(history_msg.model_dump_json())
 
+        # Send current ESP32 device list
+        async with _esp32_lock:
+            devices = list(_esp32_store.values())
+        esp32_msg = WebSocketMessage(
+            event="esp32_list",
+            data=[d.model_dump() for d in devices],
+        )
+        await ws.send_text(esp32_msg.model_dump_json())
+
     def disconnect(self, ws: WebSocket) -> None:
         if ws in self._connections:
             self._connections.remove(ws)
@@ -86,7 +101,10 @@ class ConnectionManager:
             event="new_alert",
             data=alert.model_dump(),
         )
-        payload = msg.model_dump_json()
+        await self.broadcast_raw(msg.model_dump_json())
+
+    async def broadcast_raw(self, payload: str) -> None:
+        """Send a pre-serialised JSON string to every connected client."""
         stale: list[WebSocket] = []
         for ws in self._connections:
             try:
@@ -228,6 +246,53 @@ async def ble_encode(alert: SentinelAlert) -> dict[str, Any]:
         "max_ble_bytes": 512,
         "decoded": unpack_alert(binary),
     }
+
+
+# ---------------------------------------------------------------------------
+# ESP32 device endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/esp32/update", tags=["esp32"])
+async def esp32_update(device: ESP32Device) -> dict[str, Any]:
+    """
+    Receive a location + severity packet from an ESP32 field node.
+
+    The device_id is used as the upsert key — repeated updates from the same
+    node move the marker rather than creating duplicates.
+    """
+    device.severity = device.severity.upper()
+    if device.severity not in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+        device.severity = "LOW"
+    if not device.name:
+        device.name = device.device_id
+
+    async with _esp32_lock:
+        _esp32_store[device.device_id] = device
+
+    # Broadcast live update to all dashboard WebSocket clients
+    msg = WebSocketMessage(event="esp32_update", data=device.model_dump())
+    await manager.broadcast_raw(msg.model_dump_json())
+
+    logger.info("ESP32 update: %s  sev=%s  %.5f,%.5f", device.device_id, device.severity, device.lat, device.lon)
+    return {"status": "ok", "device_id": device.device_id, "severity": device.severity}
+
+
+@app.get("/api/esp32/devices", response_model=ESP32ListResponse, tags=["esp32"])
+async def esp32_list() -> ESP32ListResponse:
+    """Return all known ESP32 field nodes."""
+    async with _esp32_lock:
+        devices = list(_esp32_store.values())
+    return ESP32ListResponse(count=len(devices), devices=devices)
+
+
+@app.delete("/api/esp32/devices/{device_id}", tags=["esp32"])
+async def esp32_delete(device_id: str) -> dict[str, Any]:
+    """Remove an ESP32 node from the live map."""
+    async with _esp32_lock:
+        removed = _esp32_store.pop(device_id, None)
+    if removed is None:
+        return JSONResponse(status_code=404, content={"status": "error", "detail": "Device not found"})
+    return {"status": "ok", "removed": device_id}
 
 
 # ---------------------------------------------------------------------------

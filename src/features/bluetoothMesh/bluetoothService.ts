@@ -91,3 +91,10 @@ export function setDeviceRole(role: 'SENDER' | 'RECEIVER' | 'FULL') {
     if (!RahatMesh) return;
     RahatMesh.setDeviceRole(role);
 }
+
+/** Push current severity level into the BLE advertisement payload.
+ *  0=OK, 1=GREEN, 2=ORANGE, 3=RED */
+export function updateSeverity(level: 0 | 1 | 2 | 3) {
+    if (!RahatMesh) return;
+    RahatMesh.updateSeverity(level);
+}

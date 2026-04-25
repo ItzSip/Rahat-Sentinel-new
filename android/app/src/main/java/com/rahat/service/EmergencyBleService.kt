@@ -58,7 +58,7 @@ class EmergencyBleService : Service() {
     // Rotation Settings
     private val ROTATION_INTERVAL_MS = IdentityManager.TIME_WINDOW_MS // 10 Minutes
 
-    private var currentSeverity = 2 // Default to HIGH for testing emergency
+    private var currentSeverity = 0 // 0=OK,1=GREEN,2=ORANGE,3=RED — updated from JS
     private var lastLat = 0.0
     private var lastLng = 0.0
 
@@ -113,16 +113,22 @@ class EmergencyBleService : Service() {
         Log.i(TAG, "BLE_SERVICE_ON_START_COMMAND: Activating Mesh")
         
         intent?.let {
-            val newLat = it.getDoubleExtra("lat", 0.0)
-            val newLng = it.getDoubleExtra("lng", 0.0)
-            if (newLat != 0.0 || newLng != 0.0) {
+            val newLat = it.getDoubleExtra("lat", Double.MIN_VALUE)
+            val newLng = it.getDoubleExtra("lng", Double.MIN_VALUE)
+            val newSev = it.getIntExtra("severity", -1)
+
+            if (newSev >= 0) {
+                currentSeverity = newSev.coerceIn(0, 3)
+                Log.d(TAG, "BLE_SEVERITY_UPDATE: $currentSeverity")
+            }
+            if (newLat != Double.MIN_VALUE && newLng != Double.MIN_VALUE) {
                 lastLat = newLat
                 lastLng = newLng
-                
-                // Immediately update advertiser with new location if it's already running
+            }
+            // Push updated payload if advertiser is running
+            if (newSev >= 0 || (newLat != Double.MIN_VALUE)) {
                 currentEphId?.let { ephId ->
                     if (this::advertiser.isInitialized) {
-                        Log.d(TAG, "BLE_LOCATION_UPDATE: Pushing new GPS to advertiser (${"%.4f".format(lastLat)}, ${"%.4f".format(lastLng)})")
                         advertiser.startOrUpdateAdvertising(ephId, currentSeverity, lastLat, lastLng)
                     }
                 }

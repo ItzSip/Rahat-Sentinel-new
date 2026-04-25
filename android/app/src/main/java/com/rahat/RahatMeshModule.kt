@@ -60,6 +60,19 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
         }
     }
 
+    /** Push current severity level to the BLE advertiser payload.
+     *  level: 0=OK, 1=GREEN, 2=ORANGE, 3=RED */
+    @ReactMethod
+    fun updateSeverity(level: Int) {
+        val intent = Intent(reactContext, EmergencyBleService::class.java)
+        intent.putExtra("severity", level)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            reactContext.startForegroundService(intent)
+        } else {
+            reactContext.startService(intent)
+        }
+    }
+
     /**
      * Set device role before calling startScanning().
      * role: "SENDER" | "RECEIVER" | "FULL"
@@ -92,41 +105,48 @@ class RahatMeshModule(private val reactContext: ReactApplicationContext) : React
         if (isObserving) return
         isObserving = true
         scope.launch {
-            MeshRepository.nearbyPeers.collectLatest { peers ->
-                val array = Arguments.createArray()
-                peers.forEach { p ->
-                    val map = Arguments.createMap()
-                    map.putString("id", p.rId)
-                    map.putString("name", p.name)
-                    map.putString("severity", p.severity)
-                    map.putString("signalLevel", p.signalLevel.name)
-                    map.putString("signalTrend", p.signalTrend.name)
-                    map.putDouble("lastSeen", p.lastSeen.toDouble())
-                    if (p.latitude != null && p.longitude != null) {
-                        map.putDouble("latitude", p.latitude)
-                        map.putDouble("longitude", p.longitude)
+            MeshRepository.nearbyPeers.collect { peers ->
+                try {
+                    val array = Arguments.createArray()
+                    peers.forEach { p ->
+                        val map = Arguments.createMap()
+                        map.putString("id", p.rId)
+                        map.putString("name", p.name)
+                        map.putString("severity", p.severity)
+                        map.putString("signalLevel", p.signalLevel.name)
+                        map.putString("signalTrend", p.signalTrend.name)
+                        map.putDouble("lastSeen", p.lastSeen.toDouble())
+                        if (p.latitude != null && p.longitude != null) {
+                            map.putDouble("latitude", p.latitude)
+                            map.putDouble("longitude", p.longitude)
+                        }
+                        array.pushMap(map)
                     }
-                    array.pushMap(map)
+                    sendEvent("onPeersUpdated", array)
+                } catch (e: Exception) {
+                    Log.e("RahatMeshModule", "onPeersUpdated emit failed: ${e.message}")
+                    // Don't rethrow — keeps the collection alive for next peer update
                 }
-                sendEvent("onPeersUpdated", array)
             }
         }
     }
 
-    /**
-     * Delivers a received BLE event frame to the JS NativeEventEmitter as "onDataReceived".
-     * Called from BleChannels.onFrameReceived on whatever thread BleGattServer fires on.
-     */
     fun sendEventToJS(frame: String) {
         Log.d("RahatMeshModule", "[BLE RX → JS] ${frame.take(80)}")
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit("onDataReceived", frame)
+        sendEvent("onDataReceived", frame)
     }
 
-    private fun sendEvent(eventName: String, params: WritableArray?) {
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit(eventName, params)
+    private fun sendEvent(eventName: String, params: Any?) {
+        if (!reactContext.hasActiveReactInstance()) {
+            Log.w("RahatMeshModule", "sendEvent($eventName) skipped — no active React instance")
+            return
+        }
+        try {
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit(eventName, params)
+        } catch (e: Exception) {
+            Log.e("RahatMeshModule", "sendEvent($eventName) failed: ${e.message}")
+        }
     }
 }

@@ -137,7 +137,7 @@ class BleAdvertiser(private val context: Context) {
             val idBytes = ByteArray(16)
             for (i in 0 until 16) idBytes[i] = ephId.substring(i * 2, i * 2 + 2).toInt(16).toByte()
             buf.put(idBytes)
-            buf.put(if (severity >= 2) 1.toByte() else 0.toByte())
+            buf.put(severity.coerceIn(0, 3).toByte()) // 0=OK,1=GREEN,2=ORANGE,3=RED
             // Encode lat/lng as 3-byte little-endian signed integers (×10000)
             val latInt = (lat * 10000).toInt().coerceIn(-900000, 900000)
             val lngInt = (lng * 10000).toInt().coerceIn(-1800000, 1800000)

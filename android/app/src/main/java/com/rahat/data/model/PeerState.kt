@@ -11,7 +11,7 @@ enum class SignalTrend {
 data class PeerState(
     val rId: String,
     val name: String,
-    val severity: String = "HIGH",
+    val severity: String = "NORMAL",
     val signalLevel: SignalLevel = SignalLevel.WEAK,
     val signalTrend: SignalTrend = SignalTrend.STABLE,
     val lastSeen: Long = System.currentTimeMillis(),
