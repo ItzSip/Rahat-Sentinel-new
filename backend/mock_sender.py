@@ -28,16 +28,16 @@ import redis  # type: ignore
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 CHANNEL = "sentinel:alerts"
 
-# Bhilai / Durg region defaults
-DEFAULT_CENTER = {"lat": 21.19, "lon": 81.35}
+# NIT Delhi region defaults
+DEFAULT_CENTER = {"lat": 28.7453, "lon": 77.1157}
 
 DISTRICTS = [
-    "Bhilai/Durg",
-    "Durg",
-    "Bhilai",
-    "Rajnandgaon",
-    "Balod",
-    "Bemetara",
+    "NIT Delhi",
+    "North Delhi",
+    "North West Delhi",
+    "Civil Lines",
+    "Model Town",
+    "Rohini",
 ]
 
 

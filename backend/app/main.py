@@ -213,7 +213,7 @@ async def simulate_alert() -> dict[str, Any]:
         id=uuid.uuid4().hex[:12],
         risk_score=risk,
         cells=cells,
-        district="Bhilai/Durg",
+        district="NIT Delhi",
         region_id=1,
         severity=severity,
         gradcam_hash=uuid.uuid4().hex[:16],

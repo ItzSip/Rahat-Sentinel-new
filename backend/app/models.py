@@ -3,8 +3,8 @@ Pydantic v2 models for the Rahat Sentinel alert backbone.
 
 Data contract:
   - 20x20 spatial risk grid (quantized risk matrix)
-  - Default center: Bhilai (Lat: 21.19, Lon: 81.35)
-  - District: Bhilai/Durg
+  - Default center: NIT Delhi (Lat: 28.7453, Lon: 77.1157)
+  - District: NIT Delhi
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from pydantic import BaseModel, Field
 class GeoCenter(BaseModel):
     """Geographic center point of the alert region."""
 
-    lat: float = Field(default=21.19, description="Latitude (default: Bhilai)")
-    lon: float = Field(default=81.35, description="Longitude (default: Bhilai)")
+    lat: float = Field(default=28.7453, description="Latitude (default: NIT Delhi)")
+    lon: float = Field(default=77.1157, description="Longitude (default: NIT Delhi)")
 
 
 class SentinelAlert(BaseModel):
@@ -49,7 +49,7 @@ class SentinelAlert(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO-8601 UTC timestamp",
     )
-    district: str = Field(default="Bhilai/Durg")
+    district: str = Field(default="NIT Delhi")
     region_id: int = Field(
         default=1, ge=0, le=65535, description="Region ID for BLE encoding (uint16)"
     )

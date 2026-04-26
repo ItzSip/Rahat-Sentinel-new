@@ -19,5 +19,6 @@ class RahatPackage : ReactPackage {
     ): MutableList<NativeModule> = mutableListOf(
         RahatMeshModule(reactContext),
         ShakeModule(reactContext),
+        RahatNodeModule(reactContext),
     )
 }

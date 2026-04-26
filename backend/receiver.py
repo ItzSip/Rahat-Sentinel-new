@@ -204,9 +204,12 @@ async def ws_listener() -> None:
 # ---------------------------------------------------------------------------
 
 DEMO_DISTRICTS = [
-    "Bhilai/Durg", "Raipur", "Bilaspur", "Korba",
-    "Rajnandgaon", "Vidarbha", "Nagpur", "Amravati",
+    "NIT Delhi", "North Delhi", "Civil Lines", "Rohini",
+    "Model Town", "Pitampura", "Burari", "Shalimar Bagh",
 ]
+
+# NIT Delhi center: 28.7453°N, 77.1157°E
+_NIT_LAT, _NIT_LON = 28.7453, 77.1157
 
 
 def _random_alert_data() -> dict[str, Any]:
@@ -222,8 +225,8 @@ def _random_alert_data() -> dict[str, Any]:
         "gradcam_hash": uuid.uuid4().hex[:16],
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "center": {
-            "lat": round(random.uniform(20.0, 22.0), 4),
-            "lon": round(random.uniform(79.0, 82.0), 4),
+            "lat": round(_NIT_LAT + random.uniform(-0.05, 0.05), 4),
+            "lon": round(_NIT_LON + random.uniform(-0.05, 0.05), 4),
         },
     }
 

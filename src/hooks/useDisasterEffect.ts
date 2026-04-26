@@ -207,8 +207,10 @@ export function useDisasterEffect(severity: SeverityLevel) {
         const locTimer = setInterval(() => {
             const loc = useDeviceStore.getState().myLocation;
             if (!loc) return;
-            const msg = `SOS:LAT:${loc.latitude.toFixed(4)},LNG:${loc.longitude.toFixed(4)}`;
-            fetch(`http://192.168.4.1/send?data=${encodeURIComponent(msg)}`).catch(() => {});
+            fetch('http://192.168.4.1/location', {
+                method: 'POST',
+                body: `${loc.latitude.toFixed(6)},${loc.longitude.toFixed(6)},RED`,
+            }).catch(() => {});
         }, 5 * 60_000);
 
         return () => {

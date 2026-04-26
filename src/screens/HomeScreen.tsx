@@ -27,8 +27,11 @@ import { emitTestEvent } from '../core/eventEngine';
 import { useDisasterStore } from '../store/disasterStore';
 import { useDisasterEffect } from '../hooks/useDisasterEffect';
 import { useSeverity } from '../hooks/useSeverity';
+import { useRahatNode } from '../hooks/useRahatNode';
 import { useStrings } from '../i18n/strings';
 import { useNarrator } from '../hooks/useNarrator';
+
+const { RahatNodeModule } = NativeModules;
 
 // ---------------------------------------------------------------------------
 // Geo helpers
@@ -244,6 +247,7 @@ export default function HomeScreen() {
     const isDisasterActive = useDisasterStore(s => s.isDisasterActive);
     const severity = useSeverity();
     useDisasterEffect(severity);
+    useRahatNode(severity);
     const str = useStrings();
     const { speak } = useNarrator();
 
@@ -341,31 +345,47 @@ export default function HomeScreen() {
         if (isScanning) setBtOn(true);
     }, [isScanning]);
 
-    // Keep a ref so the 30-min interval always reads the latest fix without stale closure
+    // Keep refs so intervals always read the latest values without stale closures
     const userLocationRef = useRef(userLocation);
+    const severityRef = useRef(severity);
     useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
+    useEffect(() => { severityRef.current = severity; }, [severity]);
 
-    // Periodic location beacon — fires every 30 min while app is open
+    // Periodic location+severity beacon — fires every 30 min while app is open
     useEffect(() => {
         const id = setInterval(() => {
             const loc = userLocationRef.current;
             if (!loc) return;
-            const msg = `LAT:${loc.latitude.toFixed(4)},LNG:${loc.longitude.toFixed(4)}`;
-            fetch(`http://192.168.4.1/send?data=${encodeURIComponent(msg)}`).catch(() => {});
+            const sev = severityRef.current;
+            fetch('http://192.168.4.1/location', {
+                method: 'POST',
+                body: `${loc.latitude.toFixed(6)},${loc.longitude.toFixed(6)},${sev}`,
+            }).catch(() => {});
         }, 30 * 60 * 1000);
         return () => clearInterval(id);
     }, []);
 
     const handleSOS = useCallback(() => {
         emitTestEvent('SOS');
-        const lat = userLocation?.latitude ?? 0;
-        const lng = userLocation?.longitude ?? 0;
-        const message = userLocation
-            ? `LAT:${lat.toFixed(4)},LNG:${lng.toFixed(4)}`
-            : 'NO_FIX';
-        fetch(`http://192.168.4.1/send?data=${encodeURIComponent(message)}`).catch(() => {});
+        const loc = userLocationRef.current;
+        const lat = loc?.latitude ?? 0;
+        const lng = loc?.longitude ?? 0;
+        const sev = severityRef.current;
+        // Dual send: BT + HTTP POST via native module (non-blocking)
+        if (loc && RahatNodeModule) {
+            RahatNodeModule.sendLocation(lat, lng, sev + '_SOS').catch(() => {});
+        }
+        // Fallback HTTP GET (works even without BT connection)
+        fetch(
+            `http://192.168.4.1/location`,
+            {
+                method: 'POST',
+                body: `${lat.toFixed(6)},${lng.toFixed(6)},${sev}_SOS`,
+            }
+        ).catch(() => {});
+        const message = loc ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'NO_FIX';
         navigation.navigate('SOSConfirmation', { message, lat, lng });
-    }, [navigation, userLocation]);
+    }, [navigation]);
 
     // Continuous location watcher — called by MapLibreGL.UserLocation on every fix.
     // Two-tier filtering keeps the map stable:

@@ -211,9 +211,103 @@ tr.device-row:hover { background: var(--surface2); }
 .leaflet-popup-tip { background: var(--surface); }
 .popup-title { font-weight: 600; margin-bottom: 4px; }
 .popup-row { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--muted); margin: 2px 0; }
+
+/* ── My Location pulsing dot ── */
+.my-loc-outer {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(0,212,255,0.25);
+  display: flex; align-items: center; justify-content: center;
+  animation: loc-pulse 2s ease-out infinite;
+}
+.my-loc-inner {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--cyan);
+  border: 2px solid #fff;
+  box-shadow: 0 0 8px var(--cyan);
+}
+@keyframes loc-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(0,212,255,.6); }
+  70%  { box-shadow: 0 0 0 14px rgba(0,212,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,212,255,0); }
+}
+
+/* ── Permission overlay ── */
+#perm-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(10,14,26,.92);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+#perm-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 36px 32px;
+  max-width: 400px;
+  text-align: center;
+}
+#perm-card .perm-icon { font-size: 48px; margin-bottom: 16px; }
+#perm-card h2 { color: var(--cyan); font-size: 20px; margin-bottom: 10px; }
+#perm-card p { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 24px; }
+.perm-items { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+.perm-item {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px; text-align: left;
+}
+.perm-item-icon { font-size: 22px; }
+.perm-item-text strong { display: block; color: var(--text); font-size: 13px; }
+.perm-item-text span  { color: var(--muted); font-size: 11px; }
+.perm-status { font-size: 10px; margin-left: auto; padding: 2px 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+.perm-status.granted { background: rgba(34,197,94,.15); border-color: var(--green); color: var(--green); }
+.perm-status.denied  { background: rgba(239,68,68,.15);  border-color: var(--red);   color: var(--red); }
+.perm-btn {
+  width: 100%; padding: 12px;
+  background: var(--cyan); border: none; border-radius: 8px;
+  color: #000; font-size: 14px; font-weight: 700;
+  cursor: pointer; margin-bottom: 8px; transition: opacity .15s;
+}
+.perm-btn:hover { opacity: .85; }
+.perm-skip {
+  width: 100%; padding: 8px;
+  background: transparent; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.perm-skip:hover { border-color: var(--muted); }
 </style>
 </head>
 <body>
+
+<!-- ══════════════════ PERMISSION OVERLAY ══════════════════ -->
+<div id="perm-overlay">
+  <div id="perm-card">
+    <div class="perm-icon">⛑️</div>
+    <h2>Rahat Sentinel Dashboard</h2>
+    <p>Grant the following permissions to enable live operator tracking and nearby device discovery.</p>
+    <div class="perm-items">
+      <div class="perm-item">
+        <span class="perm-item-icon">📍</span>
+        <div class="perm-item-text">
+          <strong>Location</strong>
+          <span>Shows your exact position on the map</span>
+        </div>
+        <span class="perm-status" id="ps-location">Pending</span>
+      </div>
+      <div class="perm-item">
+        <span class="perm-item-icon">🔵</span>
+        <div class="perm-item-text">
+          <strong>Bluetooth</strong>
+          <span>Discover nearby Sentinel field nodes</span>
+        </div>
+        <span class="perm-status" id="ps-bluetooth">Pending</span>
+      </div>
+    </div>
+    <button class="perm-btn" id="perm-grant-btn" onclick="requestPerms()">Grant Permissions</button>
+    <button class="perm-skip" onclick="skipPerms()">Skip — I'll grant later</button>
+  </div>
+</div>
 
 <header>
   <span class="logo">⛑</span>
@@ -243,7 +337,18 @@ tr.device-row:hover { background: var(--surface2); }
       <div class="stat-row"><span class="stat-label">Total Received</span><span class="stat-val" id="s-total">0</span></div>
       <div class="stat-row"><span class="stat-label">Peak Risk</span><span class="stat-val" id="s-peak">—</span></div>
     </div>
-    <button class="simulate-btn" onclick="simulate()">Simulate Alert</button>
+    <div class="sidebar-section">
+      <h3>Operator Location</h3>
+      <div class="stat-row"><span class="stat-label">📍 Position</span><span class="stat-val" id="s-myloc" style="font-size:10px;font-family:monospace">—</span></div>
+      <div class="stat-row"><span class="stat-label">🎯 Accuracy</span><span class="stat-val" id="s-myacc">—</span></div>
+      <div class="stat-row"><span class="stat-label">🔵 Bluetooth</span><span class="stat-val" id="s-bt" style="font-size:10px">—</span></div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="simulate-btn" style="margin:0;flex:1;padding:6px" onclick="centerOnMe()">📍 Center on Me</button>
+        <button class="simulate-btn" style="margin:0;flex:1;padding:6px;border-color:#818cf8;color:#818cf8" onclick="requestBluetooth()">🔵 BT Scan</button>
+      </div>
+    </div>
+    <button class="simulate-btn" onclick="simulate()">⚡ Simulate Alert</button>
+    <button class="simulate-btn" style="margin-top:6px;background:rgba(255,45,85,.15);border-color:var(--crimson);color:var(--crimson)" onclick="clearDevices()">✕ Clear ESP32 Markers</button>
     <div class="sidebar-section" style="padding-bottom:4px">
       <h3>Live Alerts <span id="alert-count" style="color:var(--cyan)">0</span></h3>
     </div>
@@ -317,7 +422,7 @@ tr.device-row:hover { background: var(--surface2); }
 // ─────────────────────────────────────────────
 const BASE     = 'http://localhost:8000';
 const WS_URL   = 'ws://localhost:8000/ws/alerts';
-const DEFAULT_CENTER = [21.19, 81.35];
+const DEFAULT_CENTER = [28.7453, 77.1157]; // NIT Delhi
 
 let currentView = 'map';
 let ws = null;
@@ -621,6 +726,21 @@ async function simulate() {
   } catch { log('Simulate failed'); }
 }
 
+async function clearDevices() {
+  const ids = Object.keys(devices);
+  if (ids.length === 0) { log('No ESP32 devices to clear'); return; }
+  await Promise.all(ids.map(id =>
+    fetch(`${BASE}/api/esp32/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
+  ));
+  ids.forEach(id => {
+    if (markerMap[id]) { map.removeLayer(markerMap[id]); delete markerMap[id]; }
+    delete devices[id];
+  });
+  document.getElementById('s-esp32').textContent = '0';
+  renderTable();
+  log(`Cleared ${ids.length} ESP32 device(s) from map`);
+}
+
 // ─────────────────────────────────────────────
 // View switching
 // ─────────────────────────────────────────────
@@ -662,6 +782,149 @@ function showToast(msg) {
   t.style.display = 'block';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.style.display = 'none', 5000);
+}
+
+// ─────────────────────────────────────────────
+// Permission overlay
+// ─────────────────────────────────────────────
+function setPermStatus(id, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = state === 'granted' ? 'Granted' : state === 'denied' ? 'Denied' : 'Pending';
+  el.className = 'perm-status' + (state === 'granted' ? ' granted' : state === 'denied' ? ' denied' : '');
+}
+
+async function requestPerms() {
+  const btn = document.getElementById('perm-grant-btn');
+  btn.textContent = 'Requesting…';
+  btn.disabled = true;
+
+  // 1. Location
+  await new Promise(resolve => {
+    navigator.geolocation.getCurrentPosition(
+      () => { setPermStatus('ps-location', 'granted'); resolve(); },
+      () => { setPermStatus('ps-location', 'denied');  resolve(); },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
+  // 2. Bluetooth (Web Bluetooth — requires HTTPS or localhost)
+  if (navigator.bluetooth) {
+    try {
+      // Just check if we can get the availability; actual device selection on demand
+      const available = await navigator.bluetooth.getAvailability();
+      setPermStatus('ps-bluetooth', available ? 'granted' : 'denied');
+    } catch {
+      setPermStatus('ps-bluetooth', 'denied');
+    }
+  } else {
+    setPermStatus('ps-bluetooth', 'denied');
+    document.getElementById('s-bt').textContent = 'Not supported';
+  }
+
+  btn.textContent = 'Done ✓';
+  setTimeout(() => skipPerms(), 800);
+}
+
+function skipPerms() {
+  document.getElementById('perm-overlay').style.display = 'none';
+  startLocationTracking();
+}
+
+// ─────────────────────────────────────────────
+// Live location tracking
+// ─────────────────────────────────────────────
+let myLocationMarker = null;
+let myAccCircle      = null;
+let myWatchId        = null;
+let myLatLng         = null;
+
+function startLocationTracking() {
+  if (!navigator.geolocation) {
+    document.getElementById('s-myloc').textContent = 'Not supported';
+    return;
+  }
+  myWatchId = navigator.geolocation.watchPosition(
+    pos => updateMyLocation(pos.coords),
+    err => {
+      log('Location: ' + err.message);
+      document.getElementById('s-myloc').textContent = 'Denied';
+    },
+    { enableHighAccuracy: true, maximumAge: 4000, timeout: 15000 }
+  );
+}
+
+function updateMyLocation(coords) {
+  const { latitude: lat, longitude: lon, accuracy } = coords;
+  myLatLng = [lat, lon];
+
+  // Update accuracy circle
+  if (myAccCircle) {
+    myAccCircle.setLatLng(myLatLng).setRadius(accuracy);
+  } else {
+    myAccCircle = L.circle(myLatLng, {
+      radius: accuracy, color: '#00d4ff', weight: 1,
+      fillColor: '#00d4ff', fillOpacity: 0.08,
+    }).addTo(map);
+  }
+
+  // Update or create pulsing "you are here" marker
+  if (myLocationMarker) {
+    myLocationMarker.setLatLng(myLatLng);
+    myLocationMarker.setPopupContent(myLocPopup(lat, lon, accuracy));
+  } else {
+    const icon = L.divIcon({
+      html: '<div class="my-loc-outer"><div class="my-loc-inner"></div></div>',
+      className: '', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -14],
+    });
+    myLocationMarker = L.marker(myLatLng, { icon, zIndexOffset: 1000 })
+      .bindPopup(myLocPopup(lat, lon, accuracy), { maxWidth: 220 })
+      .addTo(map);
+    // First fix: fly to operator location
+    map.flyTo(myLatLng, 16, { duration: 1.8 });
+    log(`Location acquired: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+  }
+
+  document.getElementById('s-myloc').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  document.getElementById('s-myacc').textContent = `±${accuracy.toFixed(0)} m`;
+}
+
+function myLocPopup(lat, lon, acc) {
+  return `<div class="popup-title">📍 Operator Location</div>
+    <div class="popup-row"><span>Latitude</span><span>${lat.toFixed(6)}</span></div>
+    <div class="popup-row"><span>Longitude</span><span>${lon.toFixed(6)}</span></div>
+    <div class="popup-row"><span>Accuracy</span><span>±${acc.toFixed(0)} m</span></div>`;
+}
+
+function centerOnMe() {
+  if (!myLatLng) { showToast('Location not available yet'); return; }
+  map.flyTo(myLatLng, 16, { duration: 1.2 });
+  myLocationMarker?.openPopup();
+}
+
+// ─────────────────────────────────────────────
+// Bluetooth scan
+// ─────────────────────────────────────────────
+async function requestBluetooth() {
+  if (!navigator.bluetooth) {
+    showToast('Web Bluetooth not supported — use Chrome/Edge');
+    document.getElementById('s-bt').textContent = 'Not supported';
+    return;
+  }
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [],
+    });
+    const name = device.name || device.id;
+    document.getElementById('s-bt').textContent = name;
+    log(`Bluetooth: paired with "${name}"`);
+    showToast(`Bluetooth: connected to ${name}`);
+  } catch (e) {
+    if (e.name !== 'NotFoundError') {
+      log('Bluetooth: ' + e.message);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────
