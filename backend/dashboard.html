@@ -347,6 +347,13 @@ tr.device-row:hover { background: var(--surface2); }
         <button class="simulate-btn" style="margin:0;flex:1;padding:6px;border-color:#818cf8;color:#818cf8" onclick="requestBluetooth()">🔵 BT Scan</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <h3>Receiver Module <span id="serial-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--muted);margin-left:4px;vertical-align:middle"></span></h3>
+      <div class="stat-row"><span class="stat-label">📡 Status</span><span class="stat-val" id="s-serial">Not connected</span></div>
+      <div class="stat-row"><span class="stat-label">📦 Last SOS</span><span class="stat-val" id="s-serial-loc" style="font-size:10px;font-family:monospace">—</span></div>
+      <div class="stat-row"><span class="stat-label">🚨 Severity</span><span class="stat-val" id="s-serial-sev">—</span></div>
+      <button class="simulate-btn" style="margin:8px 0 0;padding:7px;border-color:#a78bfa;color:#a78bfa" onclick="connectSerialPort()">🔌 Connect RAHAT_RX (USB)</button>
+    </div>
     <button class="simulate-btn" onclick="simulate()">⚡ Simulate Alert</button>
     <button class="simulate-btn" style="margin-top:6px;background:rgba(255,45,85,.15);border-color:var(--crimson);color:var(--crimson)" onclick="clearDevices()">✕ Clear ESP32 Markers</button>
     <div class="sidebar-section" style="padding-bottom:4px">
@@ -924,6 +931,118 @@ async function requestBluetooth() {
     if (e.name !== 'NotFoundError') {
       log('Bluetooth: ' + e.message);
     }
+  }
+}
+
+// ─────────────────────────────────────────────
+// Web Serial — RAHAT_RX Receiver Module
+// ─────────────────────────────────────────────
+// Maps app severity tag → ESP32 device severity for marker colouring
+const SEV_MAP = { RED: 'CRITICAL', ORANGE: 'HIGH', GREEN: 'LOW' };
+
+let serialPortRef  = null;
+let serialReading  = false;
+
+function setSerialStatus(connected) {
+  const dot  = document.getElementById('serial-dot');
+  const text = document.getElementById('s-serial');
+  if (connected) {
+    dot.style.background  = 'var(--green)';
+    dot.style.boxShadow   = '0 0 6px var(--green)';
+    dot.style.animation   = 'pulse 2s infinite';
+    text.textContent      = 'Connected';
+    text.style.color      = 'var(--green)';
+  } else {
+    dot.style.background  = 'var(--muted)';
+    dot.style.boxShadow   = 'none';
+    dot.style.animation   = 'none';
+    text.textContent      = 'Disconnected';
+    text.style.color      = '';
+  }
+}
+
+function handleSerialLine(line) {
+  // Expected format: "LOCATION:28.614200,77.209000,RED" or "LOCATION:28.614200,77.209000,RED_SOS"
+  if (!line.startsWith('LOCATION:')) return;
+
+  const payload = line.slice(9).trim();
+  const parts   = payload.split(',');
+  if (parts.length < 3) return;
+
+  const lat     = parseFloat(parts[0]);
+  const lon     = parseFloat(parts[1]);
+  const rawSev  = parts[2].replace('_SOS', '').trim().toUpperCase();
+  const espSev  = SEV_MAP[rawSev] || 'HIGH';
+  const isSOS   = parts[2].includes('SOS');
+
+  if (isNaN(lat) || isNaN(lon)) return;
+
+  // Update sidebar
+  document.getElementById('s-serial-loc').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  document.getElementById('s-serial-sev').textContent  = rawSev + (isSOS ? ' 🚨 SOS' : '');
+  document.getElementById('s-serial-sev').style.color  =
+    rawSev === 'RED' ? 'var(--crimson)' : rawSev === 'ORANGE' ? 'var(--orange)' : 'var(--green)';
+
+  // Plot / update phone marker on map
+  const device = {
+    device_id : 'PHONE_SOS',
+    name      : isSOS ? '🚨 Phone SOS' : '📱 Phone',
+    lat, lon,
+    severity  : espSev,
+    timestamp : new Date().toISOString(),
+  };
+  upsertMarker(device);
+  map.flyTo([lat, lon], 16, { duration: 1.2 });
+  switchView('map');
+
+  if (isSOS) showToast(`🚨 SOS received — ${rawSev} — ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+  log(`[RAHAT_RX] ${isSOS ? 'SOS ' : ''}${lat.toFixed(5)}, ${lon.toFixed(5)} sev=${rawSev}`);
+}
+
+async function connectSerialPort() {
+  if (!('serial' in navigator)) {
+    showToast('Web Serial not supported — use Chrome or Edge');
+    log('Web Serial API not available in this browser');
+    return;
+  }
+  try {
+    serialPortRef = await navigator.serial.requestPort();
+    await serialPortRef.open({ baudRate: 115200 });
+    setSerialStatus(true);
+    log('RAHAT_RX serial port opened at 115200 baud');
+    readSerialLoop();
+  } catch (e) {
+    if (e.name !== 'NotFoundError') log('Serial open failed: ' + e.message);
+  }
+}
+
+async function readSerialLoop() {
+  if (serialReading) return;
+  serialReading = true;
+  const decoder = new TextDecoderStream();
+  serialPortRef.readable.pipeTo(decoder.writable).catch(() => {});
+  const reader  = decoder.readable.getReader();
+  let buffer    = '';
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep partial last line
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) handleSerialLine(trimmed);
+      }
+    }
+  } catch (e) {
+    log('Serial read error: ' + e.message);
+  } finally {
+    reader.releaseLock();
+    serialReading = false;
+    setSerialStatus(false);
+    log('RAHAT_RX serial port closed');
   }
 }
 

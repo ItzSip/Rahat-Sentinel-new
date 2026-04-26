@@ -6,8 +6,8 @@ import { SeverityLevel } from '../store/severityStore';
 
 const { RahatNodeModule } = NativeModules;
 
-// Name substring to match when scanning paired BT devices
-const ESP32_BT_NAME    = 'RAHAT';
+// Matches the receiver ESP32's BT name "RAHAT_RX"
+const ESP32_BT_NAME    = 'RAHAT_RX';
 // How often to send location while app is open (ms)
 const SEND_INTERVAL_MS = 8_000;
 // Retry delay after BT disconnect (ms)

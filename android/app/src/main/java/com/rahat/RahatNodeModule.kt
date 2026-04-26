@@ -63,7 +63,9 @@ class RahatNodeModule(private val ctx: ReactApplicationContext)
                 closeSilently()
                 adapter.cancelDiscovery()
 
-                val s = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                // createRfcommSocketToServiceRecord fails with ESP32 BluetoothSerial
+                // because SDP lookup times out. Reflection on channel 1 is reliable.
+                val s = openRfcommSocket(device)
                 s.connect()
                 socket = s
                 out    = s.outputStream
@@ -130,6 +132,19 @@ class RahatNodeModule(private val ctx: ReactApplicationContext)
         } catch (e: Exception) {
             Log.w(TAG, "[HTTP] failed: ${e.message}")
             false
+        }
+    }
+
+    // ESP32 BluetoothSerial uses RFCOMM channel 1.
+    // createRfcommSocketToServiceRecord() does an SDP lookup which times out on ESP32.
+    // Reflection method bypasses SDP and directly opens channel 1 — always works.
+    private fun openRfcommSocket(device: android.bluetooth.BluetoothDevice): BluetoothSocket {
+        return try {
+            val method = device.javaClass.getMethod("createRfcommSocket", Int::class.java)
+            method.invoke(device, 1) as BluetoothSocket
+        } catch (e: Exception) {
+            Log.w(TAG, "Reflection socket failed, falling back to insecure SPP: ${e.message}")
+            device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
         }
     }
 

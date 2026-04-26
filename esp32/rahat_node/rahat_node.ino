@@ -15,8 +15,10 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-static const char* AP_SSID = "RAHAT_WIFI";
+static const char* AP_SSID = "RAHAT_NODE";
 static const char* AP_PASS = "12345678";
+
+#define LED_PIN 2          // built-in LED — lights when location received
 
 static char latestLoc[80] = "No data";
 static char latestSev[24] = "UNKNOWN";
@@ -37,6 +39,7 @@ static void parsePayload(const String& body) {
     latestSev[0] = '\0';
   }
   lastRxMs = millis();
+  digitalWrite(LED_PIN, HIGH);     // light connected LED on receipt
   Serial.printf("[LOC] %s  sev=%s\n", latestLoc, latestSev);
 }
 
@@ -81,7 +84,9 @@ void handleLocationPost() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n[Rahat] Booting...");
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+  Serial.println("\n[Rahat Sender] Booting...");
 
   WiFi.softAP(AP_SSID, AP_PASS);
   Serial.printf("[WiFi] AP: %s  IP: %s\n", AP_SSID,
